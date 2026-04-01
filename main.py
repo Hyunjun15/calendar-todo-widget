@@ -232,6 +232,21 @@ ICAL_VACATION_KEYWORDS = ["연차", "예비군", "오후반차", "오전반차",
                            "경조휴가", "병가", "휴가"]
 
 
+# ── iCal URL 보호 (base64 obfuscation) ────────────────────────────────────
+import base64 as _b64
+
+def _ical_url_encode(url: str) -> str:
+    """저장 시 URL을 base64로 인코딩"""
+    return _b64.b64encode(url.encode()).decode()
+
+def _ical_url_decode(encoded: str) -> str:
+    """읽을 때 base64 디코딩, 실패 시 원본 반환 (구버전 호환)"""
+    try:
+        return _b64.b64decode(encoded.encode()).decode()
+    except Exception:
+        return encoded  # 구버전 평문 URL 호환
+
+
 def _ical_time_label(ev) -> str:
     """시간 지정 이벤트: '시작 - 종료, 장소', 종일: '' (빈 문자열)
     sqlite3.Row 및 dict 모두 지원.
@@ -447,9 +462,10 @@ class Database:
                 created_at   TEXT    NOT NULL,
                 completed_at TEXT    DEFAULT NULL,
                 sort_order   INTEGER DEFAULT 0,
-                source       TEXT    DEFAULT 'manual',
-                color        TEXT    DEFAULT NULL,
-                file_path    TEXT    DEFAULT NULL
+                source          TEXT    DEFAULT 'manual',
+                color           TEXT    DEFAULT NULL,
+                file_path       TEXT    DEFAULT NULL,
+                is_user_deleted INTEGER DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS task_logs (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -516,6 +532,13 @@ class Database:
             except sqlite3.OperationalError:
                 pass
 
+        # is_user_deleted 컬럼 마이그레이션
+        try:
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN is_user_deleted INTEGER DEFAULT 0")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # task_type CHECK 제약이 있는 구형 DB → 재생성
         try:
             self.conn.execute(
@@ -538,13 +561,15 @@ class Database:
                 is_completed INTEGER DEFAULT 0, created_at TEXT NOT NULL,
                 completed_at TEXT DEFAULT NULL, sort_order INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'manual', color TEXT DEFAULT NULL,
-                file_path TEXT DEFAULT NULL
+                file_path TEXT DEFAULT NULL,
+                is_user_deleted INTEGER DEFAULT 0
             );
             INSERT INTO tasks_v2
                 SELECT id,title,description,
                        COALESCE(goal,''), task_type, priority, due_date,
                        is_completed, created_at, completed_at, sort_order,
-                       COALESCE(source,'manual'), NULL
+                       COALESCE(source,'manual'), NULL,
+                       COALESCE(is_user_deleted, 0)
                 FROM tasks;
             DROP TABLE tasks;
             ALTER TABLE tasks_v2 RENAME TO tasks;
@@ -565,13 +590,13 @@ class Database:
         return cur.lastrowid
 
     def get_tasks(self, task_type=None, completed=None) -> list:
-        where_parts: list[str] = []
+        where_parts: list[str] = ["is_user_deleted=0"]
         params: list = []
         if task_type:
             where_parts.append("task_type=?"); params.append(task_type)
         if completed is not None:
             where_parts.append("is_completed=?"); params.append(1 if completed else 0)
-        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        where = f"WHERE {' AND '.join(where_parts)}"
         cur = self.conn.execute(
             f"SELECT * FROM tasks {where} "
             "ORDER BY priority ASC, sort_order ASC, created_at ASC",
@@ -606,15 +631,25 @@ class Database:
         self.conn.commit()
 
     def delete_task(self, task_id):
-        self.conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+        task = self.get_task(task_id)
+        if task and task["source"] == SOURCE_FILE:
+            # 파일에서 가져온 항목: soft delete (재삽입 차단)
+            self.conn.execute(
+                "UPDATE tasks SET is_user_deleted=1 WHERE id=?", (task_id,)
+            )
+        else:
+            # 직접 입력 항목: hard delete + 로그도 삭제
+            self.conn.execute("DELETE FROM task_logs WHERE task_id=?", (task_id,))
+            self.conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         self.conn.commit()
 
     def get_task_stats(self, task_type) -> tuple[int, int]:
         total = self.conn.execute(
-            "SELECT COUNT(*) FROM tasks WHERE task_type=?", (task_type,)
+            "SELECT COUNT(*) FROM tasks WHERE task_type=? AND is_user_deleted=0",
+            (task_type,)
         ).fetchone()[0]
         done = self.conn.execute(
-            "SELECT COUNT(*) FROM tasks WHERE task_type=? AND is_completed=1",
+            "SELECT COUNT(*) FROM tasks WHERE task_type=? AND is_completed=1 AND is_user_deleted=0",
             (task_type,)
         ).fetchone()[0]
         return total, done
@@ -627,8 +662,12 @@ class Database:
         - 중복 제목이 없는 항목만 INSERT (제목 기준 중복 체크)
         - 한 번 가져온 항목은 이후 사용자가 직접 관리
         """
-        # 현재 DB의 모든 제목 (source 무관하게 중복 방지)
-        all_titles = {r["title"] for r in self.get_tasks(task_type)}
+        # 현재 DB의 모든 제목 — soft-deleted 포함, 완료 여부 무관하게 체크
+        all_titles = {
+            r["title"] for r in self.conn.execute(
+                "SELECT title FROM tasks WHERE task_type=?", (task_type,)
+            ).fetchall()
+        }
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         inserted = 0
         for t in parsed_tasks:
@@ -2135,20 +2174,53 @@ class MiscItemWidget(QFrame):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _MovableDialog(QDialog):
-    """Frameless QDialog with drag-to-move and QSizeGrip resize."""
+    """Frameless QDialog with drag-to-move, QSizeGrip resize, and size persistence."""
+
+    # QSettings에 저장할 때 사용할 key prefix (서브클래스에서 오버라이드 가능)
+    _settings_key: str = ""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._drag_pos = None
         self._grip: QSizeGrip | None = None
+        self._resizing = False
 
     def showEvent(self, event):
         super().showEvent(event)
         if self._grip is None:
             self._grip = QSizeGrip(self)
-            self._grip.resize(16, 16)
-            self._grip.setStyleSheet("background:transparent;")
+            self._grip.resize(18, 18)
+            self._grip.setStyleSheet(
+                "QSizeGrip{background:transparent;image:url(none);}"
+            )
         self._position_grip()
+        # 저장된 크기 복원
+        key = self._settings_key or self.__class__.__name__
+        settings = QSettings("CalendarTodoList", "MainWindowV2")
+        saved = settings.value(f"dialog_size/{key}")
+        if saved:
+            try:
+                w, h = int(saved.split("x")[0]), int(saved.split("x")[1])
+                self.resize(w, h)
+            except Exception:
+                pass
+
+    def closeEvent(self, event):
+        self._save_size()
+        super().closeEvent(event)
+
+    def accept(self):
+        self._save_size()
+        super().accept()
+
+    def reject(self):
+        self._save_size()
+        super().reject()
+
+    def _save_size(self):
+        key = self._settings_key or self.__class__.__name__
+        settings = QSettings("CalendarTodoList", "MainWindowV2")
+        settings.setValue(f"dialog_size/{key}", f"{self.width()}x{self.height()}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2160,10 +2232,16 @@ class _MovableDialog(QDialog):
                             self.height() - self._grip.height())
             self._grip.raise_()
 
+    def _in_grip_area(self, pos: QPoint) -> bool:
+        """우하단 24×24 grip 영역인지 확인"""
+        return (pos.x() >= self.width() - 24 and
+                pos.y() >= self.height() - 24)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = (event.globalPosition().toPoint()
-                              - self.frameGeometry().topLeft())
+            if not self._in_grip_area(event.position().toPoint()):
+                self._drag_pos = (event.globalPosition().toPoint()
+                                  - self.frameGeometry().topLeft())
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -3923,7 +4001,7 @@ class UpdatePanel(QWidget):
         self.btn_auto.toggled.connect(self._toggle_auto)
         lay.addWidget(self.btn_auto)
 
-        self.btn_refresh = QPushButton("🔄 신규 가져오기")
+        self.btn_refresh = QPushButton("🔄 캘린더 & 버전 업데이트")
         self.btn_refresh.setObjectName("RefreshBtn")
         self.btn_refresh.setFixedHeight(26)
         self.btn_refresh.clicked.connect(self.do_update)
@@ -4548,7 +4626,7 @@ class OptionsDialog(_MovableDialog):
             "https://calendar.kakaowork.com/ical/calendars/.../basic.ics"
         )
         self.ed_ical_url.textChanged.connect(
-            lambda v: self.settings.setValue("ical_url", v.strip())
+            lambda v: self.settings.setValue("ical_url", _ical_url_encode(v.strip()))
         )
         lay.addWidget(self.ed_ical_url)
 
@@ -4671,7 +4749,7 @@ class OptionsDialog(_MovableDialog):
         self.chk_notif.setChecked(self.settings.value("notif_enabled", True, type=bool))
 
         # Co-work iCal
-        self.ed_ical_url.setText(self.settings.value("ical_url", ""))
+        self.ed_ical_url.setText(_ical_url_decode(self.settings.value("ical_url", "")))
         interval = self.settings.value("ical_interval", 60, type=int)
         for i in range(self.cb_ical_interval.count()):
             if self.cb_ical_interval.itemData(i) == interval:
@@ -5001,7 +5079,7 @@ class MainWindow(QWidget):
             self._ical_timer.start(interval_min * 60 * 1000)
 
     def _auto_fetch_ical(self):
-        url = self.settings.value("ical_url", "").strip()
+        url = _ical_url_decode(self.settings.value("ical_url", "")).strip()
         if url:
             ok, _ = self._fetch_ical(url)
             if ok:
@@ -5116,24 +5194,30 @@ class MainWindow(QWidget):
     def _fetch_ical(self, url: str) -> tuple[bool, str]:
         """iCal URL에서 이벤트를 다운로드·파싱·DB 저장 후 달력 갱신.
         반환: (성공여부, 상태 메시지)"""
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "CalendarTodoList/2.13"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
         except Exception as e:
-            return False, f"⚠ 다운로드 실패: {e}"
+            last_ok = self.settings.value("ical_last_sync", "")
+            hint = f"  (마지막 성공: {last_ok})" if last_ok else ""
+            return False, f"⚠ 연결 실패: {e}{hint}"
 
         try:
             parser = ICalParser()
             events = parser.parse(raw)
         except Exception as e:
-            return False, f"⚠ 파싱 실패: {e}"
+            last_ok = self.settings.value("ical_last_sync", "")
+            hint = f"  (마지막 성공: {last_ok})" if last_ok else ""
+            return False, f"⚠ 파싱 실패: {e}{hint}"
 
         self.db.sync_ical_events(events)
         self.calendar.refresh()
         self.sec_cowork.refresh()
-        now = datetime.now().strftime("%H:%M")
-        return True, f"✅ {now}  {len(events)}개 이벤트 동기화"
+        self.settings.setValue("ical_last_sync", now_str)
+        now_disp = datetime.now().strftime("%H:%M")
+        return True, f"✅ {now_disp}  {len(events)}개 이벤트 동기화"
 
     # ── 마감일 알림 ──────────────────────────────────────────────────────────
     def _setup_deadline_timer(self):
@@ -5336,7 +5420,7 @@ class MainWindow(QWidget):
             self._apply_font_size(fs)
 
         # iCal URL이 설정돼 있으면 시작 후 2초 뒤 자동 동기화
-        if self.settings.value("ical_url", "").strip():
+        if _ical_url_decode(self.settings.value("ical_url", "")).strip():
             QTimer.singleShot(2000, self._auto_fetch_ical)
 
         # 알림 활성화 여부
