@@ -150,15 +150,15 @@ THEMES: dict[str, dict] = {
         "task_hover": "#2e2e2e",   # hover delta 강화
         "input_bg": "#1c1c1c", "border": "#333333",
     },
-    "white": {
-        "name": "라이트",
-        "base": "#f0f0f0", "mantle": "#e4e4e4",
-        "surface0": "#d0d0d0", "surface1": "#bbbbbb",
-        "overlay0": "#777777", "overlay1": "#555555",
-        "text": "#1a1a1a", "subtext": "#555555",
-        "blue": "#2563eb", "task_bg": "#e8e8e8",
-        "task_hover": "#d0d0d0",   # hover delta 강화 (어두운 방향)
-        "input_bg": "#ffffff", "border": "#bbbbbb",
+    "latte": {
+        "name": "라떼 (라이트)",
+        "base": "#eff1f5", "mantle": "#e6e9ef",
+        "surface0": "#ccd0da", "surface1": "#bcc0cc",
+        "overlay0": "#9ca0b0", "overlay1": "#8c8fa1",
+        "text": "#4c4f69", "subtext": "#6c6f85",
+        "blue": "#1e66f5", "task_bg": "#e6e9ef",
+        "task_hover": "#dce0e8",
+        "input_bg": "#eff1f5", "border": "#bcc0cc",
     },
     "navy": {
         "name": "네이비",
@@ -170,25 +170,25 @@ THEMES: dict[str, dict] = {
         "task_hover": "#2a3f5e",   # hover delta 강화
         "input_bg": "#1e293b", "border": "#334155",
     },
-    "gray": {
-        "name": "그레이",
-        "base": "#2b2b2b", "mantle": "#222222",
-        "surface0": "#383838", "surface1": "#454545",
-        "overlay0": "#888888", "overlay1": "#999999",
-        "text": "#e8e6e3", "subtext": "#b0aca8",
-        "blue": "#7ea6c2", "task_bg": "#323232",
-        "task_hover": "#484848",   # hover delta 강화
-        "input_bg": "#383838", "border": "#4a4a4a",
+    "gruvbox": {
+        "name": "그루박스",
+        "base": "#282828", "mantle": "#1d2021",
+        "surface0": "#3c3836", "surface1": "#504945",
+        "overlay0": "#928374", "overlay1": "#a89984",
+        "text": "#ebdbb2", "subtext": "#d5c4a1",
+        "blue": "#83a598", "task_bg": "#32302f",
+        "task_hover": "#45403d",
+        "input_bg": "#3c3836", "border": "#504945",
     },
-    "forest": {
-        "name": "포레스트",
-        "base": "#0f1f0f", "mantle": "#091509",
-        "surface0": "#1a2e1a", "surface1": "#243824",
-        "overlay0": "#5c7c5c", "overlay1": "#6a8a6a",
-        "text": "#d4e8d4", "subtext": "#8aab8a",
-        "blue": "#72b5e0", "task_bg": "#162016",
-        "task_hover": "#253825",   # hover delta 강화
-        "input_bg": "#1a2e1a", "border": "#2e462e",
+    "tokyo": {
+        "name": "도쿄 나이트",
+        "base": "#1a1b26", "mantle": "#13141f",
+        "surface0": "#24283b", "surface1": "#414868",
+        "overlay0": "#565f89", "overlay1": "#6b7db3",
+        "text": "#c0caf5", "subtext": "#a9b1d6",
+        "blue": "#7aa2f7", "task_bg": "#1f2335",
+        "task_hover": "#2d3149",
+        "input_bg": "#24283b", "border": "#414868",
     },
 }
 
@@ -304,7 +304,7 @@ def _theme_is_light(base_hex: str) -> bool:
     return (0.299 * r + 0.587 * g + 0.114 * b) > 128
 
 
-def build_theme_qss(theme_key: str, font_size: int = 10) -> str:
+def build_theme_qss(theme_key: str, font_size: int = 10, font_family: str = "맑은 고딕") -> str:
     """
     선택된 테마로 QSS 오버라이드 생성.
     style.qss의 하드코딩 색상(다크 전용)을 테마별로 덮어씌움.
@@ -317,6 +317,7 @@ def build_theme_qss(theme_key: str, font_size: int = 10) -> str:
     fs   = max(8, min(18, font_size))       # 기본 글자 크기
     fs_s = max(7, fs - 1)                   # 보조 레이블 (작은 글자)
     fs_l = fs + 2                           # 제목/헤더 (큰 글자)
+    ff   = font_family or "맑은 고딕"        # 글씨체
 
     # 라이트 테마: 달력 마감일 버튼 — 배경이 밝으므로 어두운 텍스트 사용
     if is_light:
@@ -352,7 +353,7 @@ QPushButton#CalDayHasTasks:hover {{
 """
 
     return f"""
-* {{ color: {t['text']}; }}
+* {{ color: {t['text']}; font-family: "{ff}"; }}
 QWidget {{ background-color: {t['base']}; }}
 QWidget#MainWindow  {{ background-color: {t['base']}; border: 1px solid {t['surface0']}; }}
 QWidget#TitleBar    {{ background-color: {t['mantle']}; border-bottom: 1px solid {t['surface0']}; }}
@@ -1232,7 +1233,7 @@ _DEADLINE_BTN_HOVER_QSS = (
 )
 
 class CalDayButton(QPushButton):
-    """달력 날짜 버튼 — 호버/더블클릭/이벤트 도트 표시"""
+    """달력 날짜 버튼 — 호버/더블클릭/이벤트 도트 + 기간 바 표시"""
     hovered        = Signal(object, object)  # date, QPoint (global topleft)
     unhovered      = Signal()
     double_clicked = Signal(object)          # date
@@ -1242,6 +1243,7 @@ class CalDayButton(QPushButton):
                  has_personal: bool = False,
                  has_deadline: bool = False,
                  has_cowork: bool = False,
+                 period_bars: list | None = None,
                  parent=None):
         super().__init__(str(day), parent)
         self._date         = d
@@ -1249,6 +1251,8 @@ class CalDayButton(QPushButton):
         self._has_personal = has_personal
         self._has_deadline = has_deadline
         self._has_cowork   = has_cowork
+        # period_bars: list of (color, pos) where pos in ("start","middle","end","single")
+        self._period_bars  = period_bars or []
 
     def enterEvent(self, e):
         super().enterEvent(e)
@@ -1270,7 +1274,36 @@ class CalDayButton(QPushButton):
 
     def paintEvent(self, e):
         super().paintEvent(e)
-        # 하단 이벤트 도트: 일정 유형 순서대로
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # ── 기간 바 (개인 일정 기간 표시) ───────────────────────
+        bar_h  = 4
+        bar_gap = 2
+        # 기간 바는 날짜 텍스트 아래부터 시작 (y=20)
+        bar_y_start = 20
+        for i, (color, pos) in enumerate(self._period_bars[:5]):
+            y = bar_y_start + i * (bar_h + bar_gap)
+            c = QColor(color); c.setAlpha(200)
+            painter.setBrush(c)
+            painter.setPen(Qt.PenStyle.NoPen)
+            w = self.width()
+            if pos == "start":
+                # 오른쪽 절반만 + 왼쪽 둥근 모서리
+                painter.drawRoundedRect(w // 2, y, w // 2, bar_h, 2, 2)
+                painter.drawRect(w // 2 + 2, y, w // 2 - 2, bar_h)
+            elif pos == "end":
+                # 왼쪽 절반만 + 오른쪽 둥근 모서리
+                painter.drawRoundedRect(0, y, w // 2, bar_h, 2, 2)
+                painter.drawRect(0, y, w // 2 - 2, bar_h)
+            elif pos == "single":
+                # 양쪽 둥근 모서리
+                painter.drawRoundedRect(4, y, w - 8, bar_h, 2, 2)
+            else:  # middle
+                # 가득 채움 (양끝 연결)
+                painter.drawRect(0, y, w, bar_h)
+
+        # ── 일반 이벤트 도트 ────────────────────────────────────
         dots = []
         for et in [SCHED_TRIP, SCHED_VACATION, SCHED_TRAINING, SCHED_SINGLE]:
             if et in self._event_types:
@@ -1279,19 +1312,18 @@ class CalDayButton(QPushButton):
             dots.append(PERSONAL_CAL_COLOR)
         if self._has_cowork:
             dots.append(KAKAOWORK_CAL_COLOR)
-        if not dots:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        dw, dh, gap = 5, 3, 2
-        total = len(dots) * dw + (len(dots) - 1) * gap
-        x = (self.width() - total) // 2
-        y = self.height() - 5
-        for color in dots:
-            painter.setBrush(QColor(color))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(x, y, dw, dh, 1, 1)
-            x += dw + gap
+
+        if dots:
+            dw, dh, gap = 5, 3, 2
+            total = len(dots) * dw + (len(dots) - 1) * gap
+            x = (self.width() - total) // 2
+            y = self.height() - 6
+            for color in dots:
+                painter.setBrush(QColor(color))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRoundedRect(x, y, dw, dh, 1, 1)
+                x += dw + gap
+
         painter.end()
 
 
@@ -1714,12 +1746,34 @@ class CalendarWidget(QWidget):
             has_personal = ds in self._personal_map
             has_cowork   = self._show_cowork and bool(self._ical_map.get(ds))
 
+            # 기간 일정 바 계산 (개인 직접 추가 일정만, iCal 제외)
+            period_bars = []
+            for r in self._sched_map.get(ds, []):
+                if not r["end_date"] or r["end_date"] == r["event_date"]:
+                    continue  # 단일일 일정은 도트로만 표시
+                color = SCHED_COLORS.get(r["event_type"], "#89b4fa")
+                try:
+                    s = date.fromisoformat(r["event_date"])
+                    en = date.fromisoformat(r["end_date"])
+                except (ValueError, TypeError):
+                    continue
+                if d == s and d == en:
+                    pos = "single"
+                elif d == s:
+                    pos = "start"
+                elif d == en:
+                    pos = "end"
+                else:
+                    pos = "middle"
+                period_bars.append((color, pos))
+
             btn = CalDayButton(d_num, d,
                                event_types=list(set(sched_types)),
                                has_personal=has_personal,
                                has_deadline=has_deadline,
-                               has_cowork=has_cowork)
-            btn.setFixedSize(38, 38)  # 도트 공간 확보
+                               has_cowork=has_cowork,
+                               period_bars=period_bars)
+            btn.setFixedSize(38, 58)  # 5개 항목 기준 높이
             btn.clicked.connect(lambda _, dt=d: self._click(dt))
             btn.double_clicked.connect(lambda _, dt=d: self.add_schedule_requested.emit(dt))
             btn.hovered.connect(self._on_hover)
@@ -2337,7 +2391,7 @@ class ScheduleDialog(_MovableDialog):
         date_row.addLayout(col_start)
 
         col_end = QVBoxLayout()
-        col_end.addWidget(self._mk_lbl("종료일 (휴가/교육/출장)"))
+        col_end.addWidget(self._mk_lbl("종료일 (선택)"))
         self.de_end = self._mk_date(self._preset)
         self.de_end.setEnabled(False)
         col_end.addWidget(self.de_end)
@@ -2382,9 +2436,7 @@ class ScheduleDialog(_MovableDialog):
         self._cur_type = etype
         for k, btn in self._type_btns.items():
             btn.setChecked(k == etype)
-        # 종료일: 휴가/교육/출장은 활성화
-        self.de_end.setEnabled(etype in (SCHED_VACATION, SCHED_TRAINING, SCHED_TRIP))
-        # 시간: 단기 일정만 활성화
+        self.de_end.setEnabled(True)   # 모든 유형에서 종료일 설정 가능
         self.ed_time.setEnabled(etype == SCHED_SINGLE)
 
     def _load(self):
@@ -2411,8 +2463,14 @@ class ScheduleDialog(_MovableDialog):
 
     def values(self) -> dict:
         start_str = self.de_start.date().toString("yyyy-MM-dd")
-        end_str   = self.de_end.date().toString("yyyy-MM-dd") \
-                    if self._cur_type in (SCHED_VACATION, SCHED_TRAINING, SCHED_TRIP) else None
+        end_qdate = self.de_end.date()
+        start_qdate = self.de_start.date()
+        # 종료일이 시작일보다 이전이면 시작일로 강제 통일
+        if end_qdate < start_qdate:
+            end_qdate = start_qdate
+        end_str = end_qdate.toString("yyyy-MM-dd")
+        # 시작일과 동일하면 None (단일일 처리)
+        end_str = None if end_str == start_str else end_str
         return {
             "name":       self.ed_name.text().strip(),
             "event_date": start_str,
@@ -3365,27 +3423,106 @@ class _CompletedItem(QFrame):
         elif ch == a_d: self.delete_requested.emit(self._id)
 
 
+class _YearGroup(QWidget):
+    """완료업무 연도별 그룹 위젯"""
+    def __init__(self, year: str, tasks: list, db, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self._year = year
+        self._tasks = tasks
+        self._collapsed = True
+        self._build()
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 4)
+        lay.setSpacing(0)
+
+        # 연도 헤더
+        hdr = QWidget()
+        hdr.setStyleSheet(
+            "QWidget{background:#2a2a3e;border-radius:6px;margin:0px;}"
+        )
+        hdr_l = QHBoxLayout(hdr)
+        hdr_l.setContentsMargins(12, 6, 8, 6)
+
+        tl = QLabel(f"📁  {self._year}년  ({len(self._tasks)}건)")
+        tl.setObjectName("SectionTitle")
+        tl.setFont(QFont("맑은 고딕", 11, QFont.Weight.Bold))
+        hdr_l.addWidget(tl)
+        hdr_l.addStretch()
+
+        self.btn_col = QPushButton("▶")
+        self.btn_col.setObjectName("SectionCollapseBtn")
+        self.btn_col.setFixedSize(24, 24)
+        self.btn_col.clicked.connect(self._toggle)
+        hdr_l.addWidget(self.btn_col)
+        lay.addWidget(hdr)
+
+        # 항목 컨테이너
+        self.body = QWidget()
+        body_l = QVBoxLayout(self.body)
+        body_l.setContentsMargins(4, 4, 0, 0)
+        body_l.setSpacing(3)
+        for t in self._tasks:
+            w = _CompletedItem(t)
+            w.restore_requested.connect(self._restore)
+            w.delete_requested.connect(self._delete)
+            body_l.addWidget(w)
+        lay.addWidget(self.body)
+        self.body.hide()
+
+    def _toggle(self):
+        self._collapsed = not self._collapsed
+        self.body.setVisible(not self._collapsed)
+        self.btn_col.setText("▶" if self._collapsed else "▼")
+
+    def _restore(self, tid):
+        self.db.toggle_complete(tid, False)
+        # 부모 CompletedSection에 refresh 요청
+        p = self.parent()
+        while p:
+            if isinstance(p, CompletedSection):
+                p.refresh(); break
+            p = p.parent()
+
+    def _delete(self, tid):
+        task = self.db.get_task(tid)
+        title = task["title"] if task else "이 항목"
+        r = QMessageBox.question(self, "삭제 확인",
+            f"'{title}'\n을(를) 영구 삭제하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if r == QMessageBox.StandardButton.Yes:
+            self.db.delete_task(tid)
+            p = self.parent()
+            while p:
+                if isinstance(p, CompletedSection):
+                    p.refresh(); break
+                p = p.parent()
+
+
 class CompletedSection(QWidget):
-    """완료업무 섹션 — 완료된 todo/urgent 태스크 표시, 드래그로 미완료 복원"""
+    """완료업무 섹션 — 완료된 todo/urgent 태스크 연도별 그룹화 표시"""
 
     def __init__(self, db: Database, parent=None):
         super().__init__(parent)
         self.db = db
-        self._collapsed = True   # 기본 접힘
+        self._collapsed = True
         self.setObjectName("SectionWidget")
         self._build()
         self.refresh()
 
     def _build(self):
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
 
         hdr_w = QWidget(); hdr_w.setObjectName("SectionHeader")
         hdr_w.setStyleSheet(
             "QWidget#SectionHeader{border-left:4px solid #585b70;border-radius:8px 8px 0 0;}"
         )
         hdr_l = QVBoxLayout(hdr_w)
-        hdr_l.setContentsMargins(12,10,10,8); hdr_l.setSpacing(6)
+        hdr_l.setContentsMargins(12, 10, 10, 8)
 
         title_row = QHBoxLayout()
         tl = QLabel("✅  완료업무"); tl.setObjectName("SectionTitle")
@@ -3394,7 +3531,7 @@ class CompletedSection(QWidget):
         self.lbl_count = QLabel("0건"); self.lbl_count.setObjectName("SectionStats")
         title_row.addWidget(self.lbl_count)
         self.btn_col = QPushButton("▶"); self.btn_col.setObjectName("SectionCollapseBtn")
-        self.btn_col.setFixedSize(26,26); self.btn_col.clicked.connect(self._toggle)
+        self.btn_col.setFixedSize(26, 26); self.btn_col.clicked.connect(self._toggle)
         title_row.addWidget(self.btn_col)
         hdr_l.addLayout(title_row)
         lay.addWidget(hdr_w)
@@ -3407,9 +3544,9 @@ class CompletedSection(QWidget):
         self.body.dropEvent      = self._drop
 
         b_lay = QVBoxLayout(self.body)
-        b_lay.setContentsMargins(8,6,8,8); b_lay.setSpacing(4)
+        b_lay.setContentsMargins(8, 6, 8, 8); b_lay.setSpacing(6)
         self.items_lay = QVBoxLayout()
-        self.items_lay.setContentsMargins(0,0,0,0); self.items_lay.setSpacing(3)
+        self.items_lay.setContentsMargins(0, 0, 0, 0); self.items_lay.setSpacing(4)
         b_lay.addLayout(self.items_lay)
         self.empty_lbl = QLabel("완료된 항목이 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
@@ -3417,38 +3554,35 @@ class CompletedSection(QWidget):
         self.empty_lbl.setStyleSheet("color:#45475a;padding:14px 0;font-size:12px;")
         b_lay.addWidget(self.empty_lbl)
         lay.addWidget(self.body)
-        self.body.hide()  # 기본 접힘
+        self.body.hide()
 
     def refresh(self):
         while self.items_lay.count():
             item = self.items_lay.takeAt(0)
             if item.widget(): item.widget().deleteLater()
+
         all_tasks = self.db.get_tasks(completed=True)
         tasks = [t for t in all_tasks if t["task_type"] in (TASK_TODO, TASK_URGENT)]
         self.lbl_count.setText(f"{len(tasks)}건")
+
         if not tasks:
             self.empty_lbl.show()
-        else:
-            self.empty_lbl.hide()
-            for t in tasks:
-                w = _CompletedItem(t)
-                w.restore_requested.connect(self._restore)
-                w.delete_requested.connect(self._delete)
-                self.items_lay.addWidget(w)
+            return
 
-    def _restore(self, tid):
-        self.db.toggle_complete(tid, False)
-        self.refresh()
+        self.empty_lbl.hide()
 
-    def _delete(self, tid):
-        task = self.db.get_task(tid)
-        title = task["title"] if task else "이 항목"
-        r = QMessageBox.question(self, "삭제 확인",
-            f"'{title}'\n을(를) 영구 삭제하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if r == QMessageBox.StandardButton.Yes:
-            self.db.delete_task(tid); self.refresh()
+        # 연도별 그룹화 (최신 연도 먼저)
+        by_year: dict[str, list] = {}
+        for t in tasks:
+            try:
+                year = (t["completed_at"] or t["created_at"] or "0000")[:4]
+            except Exception:
+                year = "기타"
+            by_year.setdefault(year, []).append(t)
+
+        for year in sorted(by_year.keys(), reverse=True):
+            group = _YearGroup(year, by_year[year], self.db, parent=self.body)
+            self.items_lay.addWidget(group)
 
     def _toggle(self):
         self._collapsed = not self._collapsed
@@ -4500,6 +4634,18 @@ class OptionsDialog(_MovableDialog):
         fs_row.addStretch()
         lay.addLayout(fs_row)
 
+        # ── 글씨체 ─────────────────────────────────────────────
+        lay.addWidget(self._lbl("글씨체"))
+        self.combo_font = QComboBox()
+        from PySide6.QtGui import QFontDatabase
+        families = sorted(QFontDatabase.families())
+        self.combo_font.addItems(families)
+        cur_ff = self.settings.value("font_family", "맑은 고딕")
+        if cur_ff in families:
+            self.combo_font.setCurrentText(cur_ff)
+        self.combo_font.currentTextChanged.connect(self._on_font_family)
+        lay.addWidget(self.combo_font)
+
         # ── 창 너비 ────────────────────────────────────────────
         lay.addWidget(self._lbl("창 너비 (px)"))
         w_row = QHBoxLayout()
@@ -4715,6 +4861,10 @@ class OptionsDialog(_MovableDialog):
     def _on_fontsize(self, v: int):
         self.settings.setValue("font_size", v)
         self.font_size_changed.emit(v)
+
+    def _on_font_family(self, family: str):
+        self.settings.setValue("font_family", family)
+        self.font_size_changed.emit(self.spin_fontsize.value())  # 테마 재적용 트리거
 
     def _pick_theme(self, key: str):
         for k, btn in self._theme_btns.items():
@@ -5465,7 +5615,8 @@ class MainWindow(QWidget):
                 base_qss = f.read()
         except FileNotFoundError:
             pass
-        self.setStyleSheet(base_qss + EXTRA_QSS + build_theme_qss(theme_key, font_size))
+        ff = self.settings.value("font_family", "맑은 고딕")
+        self.setStyleSheet(base_qss + EXTRA_QSS + build_theme_qss(theme_key, font_size, ff))
         # EventPopup도 테마 적용 (수정 5)
         self.calendar._popup.apply_theme(theme_key)
 
