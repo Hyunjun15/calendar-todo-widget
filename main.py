@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v2.31"
+APP_VERSION      = "v3.0"
 APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
