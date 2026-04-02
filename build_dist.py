@@ -55,7 +55,7 @@ def main():
     step(2, "이전 빌드 정리")
     shutil.rmtree(DIST_ROOT, ignore_errors=True)
     shutil.rmtree(BASE / "build_tmp", ignore_errors=True)
-    for f in (BASE / f"{_EXE_ASCII}.spec", BASE / f"{_EXE_KR}.spec"):
+    for f in (BASE / f"{_EXE_ASCII}.spec",):
         if f.exists(): f.unlink()
     print("    완료")
 

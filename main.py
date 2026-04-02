@@ -33,7 +33,7 @@ from logging.handlers import RotatingFileHandler
 from PySide6.QtWidgets import (
     QApplication, QWidget, QDialog,
     QVBoxLayout, QHBoxLayout, QGridLayout,
-    QScrollArea, QFrame, QSizePolicy,
+    QScrollArea, QFrame, QSizePolicy, QSplitter,
     QLabel, QLineEdit, QTextEdit, QPlainTextEdit,
     QCheckBox, QPushButton, QComboBox, QProgressBar,
     QDateEdit, QMessageBox, QMenu, QSystemTrayIcon,
@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.0"
+APP_VERSION      = "v3.2"
 APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
@@ -1512,18 +1512,31 @@ class CalDayButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # ── 기간 바 (개인 일정 기간 표시) — 균일 전체 너비 ────────
+        # ── 기간 바 (개인 일정 기간 표시) ───────────────────────────
         bar_h   = 5
         bar_gap = 2
-        bar_y_start = 20
+        bar_y_start = 22
         w = self.width()
+        # 투명도: start/end=220(강조), middle=140(이어짐), single=230
+        _bar_alpha = {"start": 220, "end": 220, "middle": 140, "single": 230}
         for i, (color, pos) in enumerate(self._period_bars[:4]):
             y = bar_y_start + i * (bar_h + bar_gap)
-            c = QColor(color); c.setAlpha(210)
+            c = QColor(color)
+            c.setAlpha(_bar_alpha.get(pos, 180))
             painter.setBrush(c)
             painter.setPen(Qt.PenStyle.NoPen)
-            # 모든 위치(start/middle/end/single) 동일한 전체 너비 바
-            painter.drawRoundedRect(2, y, w - 4, bar_h, 2, 2)
+            if pos == "start":
+                # 오른쪽 절반부터 시작 (시작점 강조)
+                painter.drawRoundedRect(w // 2, y, w // 2 - 1, bar_h, bar_h // 2, bar_h // 2)
+                painter.drawRect(w // 2, y, w // 4, bar_h)      # 오른쪽 평탄화
+            elif pos == "end":
+                # 왼쪽 절반까지 (끝점 강조)
+                painter.drawRoundedRect(1, y, w // 2, bar_h, bar_h // 2, bar_h // 2)
+                painter.drawRect(w // 4, y, w // 4, bar_h)      # 왼쪽 평탄화
+            elif pos == "single":
+                painter.drawRoundedRect(4, y, w - 8, bar_h, bar_h // 2, bar_h // 2)
+            else:  # middle
+                painter.drawRect(0, y, w, bar_h)                # 양끝 이음새 없이 전체 채움
 
         # ── 원형 이벤트 도트 (기간 바로 표시된 타입 제외) ────────
         dots = []
@@ -1936,9 +1949,6 @@ class CalendarWidget(QWidget):
 
         self.day_grid = QGridLayout()
         self.day_grid.setSpacing(2)
-        self.day_grid.setColumnStretch(0, 1)
-        for _ci in range(7):
-            self.day_grid.setColumnStretch(_ci, 1)
         lay.addLayout(self.day_grid)
 
         # ── 팀 일정 패널 (날짜 클릭 시 표시) ────────────────────────────
@@ -2019,7 +2029,7 @@ class CalendarWidget(QWidget):
                                has_deadline=has_deadline,
                                has_cowork=has_cowork,
                                period_bars=period_bars)
-            btn.setMinimumSize(36, 58)  # 너비 유연 (그리드가 자동 분배)
+            btn.setFixedSize(42, 64)   # 셀 크기 고정 (텍스트+바+도트 여유 확보)
             btn.clicked.connect(lambda _, dt=d: self._click(dt))
             btn.double_clicked.connect(lambda _, dt=d: self.add_schedule_requested.emit(dt))
             btn.hovered.connect(self._on_hover)
@@ -2528,10 +2538,24 @@ class _MovableDialog(QDialog):
         super().showEvent(event)
         if self._grip is None:
             self._grip = QSizeGrip(self)
-            self._grip.resize(18, 18)
+            self._grip.resize(22, 22)
+            # 시각적 리사이즈 핸들 — 우하단 점 3개로 표시
             self._grip.setStyleSheet(
-                "QSizeGrip{background:transparent;image:url(none);}"
+                "QSizeGrip{"
+                "  background:transparent;"
+                "  image:none;"
+                "  border-image:none;"
+                "}"
             )
+            # 리사이즈 힌트 레이블 (실제 드래그는 QSizeGrip이 처리)
+            self._resize_hint = QLabel("⠿", self)
+            self._resize_hint.setFixedSize(22, 22)
+            self._resize_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._resize_hint.setStyleSheet(
+                "color:#45475a;font-size:13px;background:transparent;"
+                "letter-spacing:-1px;"
+            )
+            self._resize_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._position_grip()
         # 저장된 크기 복원
         key = self._settings_key or self.__class__.__name__
@@ -2567,14 +2591,21 @@ class _MovableDialog(QDialog):
 
     def _position_grip(self):
         if self._grip:
-            self._grip.move(self.width() - self._grip.width(),
-                            self.height() - self._grip.height())
+            gx = self.width()  - self._grip.width()
+            gy = self.height() - self._grip.height()
+            self._grip.move(gx, gy)
             self._grip.raise_()
+        if hasattr(self, "_resize_hint") and self._resize_hint:
+            self._resize_hint.move(
+                self.width()  - self._resize_hint.width(),
+                self.height() - self._resize_hint.height()
+            )
+            self._resize_hint.raise_()
 
     def _in_grip_area(self, pos: QPoint) -> bool:
-        """우하단 24×24 grip 영역인지 확인"""
-        return (pos.x() >= self.width() - 24 and
-                pos.y() >= self.height() - 24)
+        """우하단 28×28 grip 영역인지 확인"""
+        return (pos.x() >= self.width() - 28 and
+                pos.y() >= self.height() - 28)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -2893,18 +2924,39 @@ class TaskDialog(_MovableDialog):
             # 기본값 선택
             self._color_btns[0].setChecked(True)
 
-        # 첨부 파일 (여러 개)
+        # 첨부 파일 (여러 개 — 클릭 선택 또는 드래그앤드롭)
         if self._task_type in (TASK_TODO, TASK_URGENT, TASK_MISC):
-            lay.addWidget(lbl("첨부 파일 (여러 개 가능)"))
+            lay.addWidget(lbl("📎  첨부 파일"))
+            # 드롭 영역 (파일 목록 + 안내 문구 포함)
+            self._drop_area = QFrame()
+            self._drop_area.setObjectName("FileDropArea")
+            self._drop_area.setStyleSheet(
+                "QFrame#FileDropArea{border:1px dashed #45475a;border-radius:6px;"
+                "background:#1e1e2e;min-height:36px;}"
+            )
+            self._drop_area.setAcceptDrops(True)
+            self._drop_area.dragEnterEvent = self._file_drag_enter
+            self._drop_area.dropEvent      = self._file_drop
+            drop_lay = QVBoxLayout(self._drop_area)
+            drop_lay.setContentsMargins(8, 6, 8, 6)
+            drop_lay.setSpacing(2)
+
+            self._file_empty_lbl = QLabel("파일을 여기에 드래그하거나 아래 버튼으로 추가하세요")
+            self._file_empty_lbl.setStyleSheet("color:#45475a;font-size:11px;")
+            self._file_empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            drop_lay.addWidget(self._file_empty_lbl)
+
             self._file_list_lay = QVBoxLayout()
             self._file_list_lay.setSpacing(2)
             self._file_list_lay.setContentsMargins(0, 0, 0, 0)
-            lay.addLayout(self._file_list_lay)
+            drop_lay.addLayout(self._file_list_lay)
+            lay.addWidget(self._drop_area)
+
             self._pending_files: list[str] = []
             self._removed_file_ids: list[int] = []
             self._existing_files: list = []
 
-            btn_add_file = QPushButton("📎  파일 추가")
+            btn_add_file = QPushButton("📂  파일 선택 (여러 개 가능)")
             btn_add_file.setObjectName("SecondaryBtn")
             btn_add_file.setFixedHeight(32)
             btn_add_file.clicked.connect(self._add_file)
@@ -2955,8 +3007,19 @@ class TaskDialog(_MovableDialog):
         if path:
             self.ed_fpath.setText(path)
 
+    def _file_drag_enter(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def _file_drop(self, e):
+        for url in e.mimeData().urls():
+            path = url.toLocalFile()
+            if path and path not in self._pending_files:
+                self._pending_files.append(path)
+                self._add_file_row(path, is_existing=False, file_id=None)
+
     def _add_file(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "파일 선택", "", "모든 파일 (*.*)")
+        paths, _ = QFileDialog.getOpenFileNames(self, "파일 선택 (Ctrl+클릭으로 여러 개)", "", "모든 파일 (*.*)")
         for path in paths:
             if path and path not in self._pending_files:
                 self._pending_files.append(path)
@@ -2965,6 +3028,9 @@ class TaskDialog(_MovableDialog):
     def _add_file_row(self, path: str, is_existing: bool, file_id: int | None):
         if self._file_list_lay is None:
             return
+        # 파일이 추가되면 빈 상태 안내 숨김
+        if hasattr(self, "_file_empty_lbl"):
+            self._file_empty_lbl.hide()
         row_w = QWidget()
         row_lay = QHBoxLayout(row_w)
         row_lay.setContentsMargins(0, 0, 0, 0)
@@ -3366,6 +3432,15 @@ class LogDialog(_MovableDialog):
         hdr_g.addWidget(self.lbl_count)
         pg_lay.addLayout(hdr_g)
 
+        # ── QSplitter: 위=로그 목록, 아래=입력창 (드래그로 비율 조절) ──
+        splitter_g = QSplitter(Qt.Orientation.Vertical)
+        splitter_g.setHandleWidth(6)
+        splitter_g.setStyleSheet(
+            "QSplitter::handle{background:#313244;border-radius:2px;margin:1px 4px;}"
+            "QSplitter::handle:hover{background:#45475a;}"
+        )
+
+        # 위쪽: 로그 목록 스크롤 영역
         self.scroll_general = QScrollArea()
         self.scroll_general.setWidgetResizable(True)
         self.scroll_general.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -3375,19 +3450,20 @@ class LogDialog(_MovableDialog):
         self.log_lay.setSpacing(6)
         self.log_lay.addStretch()
         self.scroll_general.setWidget(self.log_cont)
-        self.scroll_general.setMinimumHeight(200)
-        pg_lay.addWidget(self.scroll_general, 1)
+        self.scroll_general.setMinimumHeight(80)
+        splitter_g.addWidget(self.scroll_general)
 
-        sep_g = QFrame(); sep_g.setFrameShape(QFrame.Shape.HLine)
-        sep_g.setMaximumHeight(1); sep_g.setObjectName("Separator")
-        pg_lay.addWidget(sep_g)
+        # 아래쪽: 입력 패널
+        input_panel = QWidget()
+        inp_lay = QVBoxLayout(input_panel)
+        inp_lay.setContentsMargins(0, 8, 0, 0)
+        inp_lay.setSpacing(6)
 
-        pg_lay.addWidget(self._mk_lbl("새 메모 작성 (Ctrl+Enter 저장)", "FormLabel"))
+        inp_lay.addWidget(self._mk_lbl("새 메모 작성 (Ctrl+Enter 저장)", "FormLabel"))
         self.ed = QPlainTextEdit()
-        self.ed.setPlaceholderText("내용 입력...")
-        self.ed.setMinimumHeight(80)
-        self.ed.setMaximumHeight(160)
-        pg_lay.addWidget(self.ed)
+        self.ed.setPlaceholderText("내용 입력... (여러 줄 가능)")
+        self.ed.setMinimumHeight(60)
+        inp_lay.addWidget(self.ed, 1)
 
         fa = QHBoxLayout(); fa.setSpacing(6)
         self.lbl_attach = QLabel("📎 파일 없음")
@@ -3403,7 +3479,7 @@ class LogDialog(_MovableDialog):
         btn_detach.setFixedSize(28, 28)
         btn_detach.clicked.connect(self._clear_attach)
         fa.addWidget(btn_detach)
-        pg_lay.addLayout(fa)
+        inp_lay.addLayout(fa)
 
         br_g = QHBoxLayout(); br_g.addStretch()
         ba_g = QPushButton("메모 추가")
@@ -3411,7 +3487,12 @@ class LogDialog(_MovableDialog):
         ba_g.setFixedHeight(34)
         ba_g.clicked.connect(self._add_general)
         br_g.addWidget(ba_g)
-        pg_lay.addLayout(br_g)
+        inp_lay.addLayout(br_g)
+
+        splitter_g.addWidget(input_panel)
+        splitter_g.setStretchFactor(0, 3)   # 로그 목록 75%
+        splitter_g.setStretchFactor(1, 1)   # 입력창 25%
+        pg_lay.addWidget(splitter_g, 1)
 
         # ── 과제진행상황 패널 ─────────────────────────────────────────────
         self.panel_progress = QWidget()
@@ -4970,25 +5051,26 @@ class UpdatePanel(QWidget):
         self.lbl_status.setFont(QFont("맑은 고딕", 10))
         lay.addWidget(self.lbl_status)
 
-        self.btn_auto = QPushButton("자동갱신 ●")
+        self.btn_auto = QPushButton("● 자동 로드  ON")
         self.btn_auto.setObjectName("AutoToggleOn")
         self.btn_auto.setCheckable(True)
         self.btn_auto.setChecked(True)
         self.btn_auto.setFixedHeight(26)
+        self.btn_auto.setToolTip("파일 변경 감지 시 자동으로 데이터 불러오기 ON/OFF")
         self.btn_auto.toggled.connect(self._toggle_auto)
         lay.addWidget(self.btn_auto)
 
-        self.btn_refresh = QPushButton("🔄 갱신")
+        self.btn_refresh = QPushButton("🔄 지금 불러오기")
         self.btn_refresh.setObjectName("RefreshBtn")
         self.btn_refresh.setFixedHeight(26)
-        self.btn_refresh.setToolTip("캘린더 & 버전 업데이트")
+        self.btn_refresh.setToolTip("Update works 최신 파일을 지금 바로 불러옵니다")
         self.btn_refresh.clicked.connect(self.do_update)
         lay.addWidget(self.btn_refresh)
 
-        self.btn_ver = QPushButton("⬆ 업데이트")
+        self.btn_ver = QPushButton("🔍 버전 확인")
         self.btn_ver.setObjectName("RefreshBtn")
         self.btn_ver.setFixedHeight(26)
-        self.btn_ver.setToolTip("GitHub 최신 버전 확인")
+        self.btn_ver.setToolTip("GitHub에서 최신 버전을 확인합니다")
         self.btn_ver.clicked.connect(self._check_github_version)
         lay.addWidget(self.btn_ver)
 
@@ -5044,7 +5126,7 @@ class UpdatePanel(QWidget):
 
     def _toggle_auto(self, on: bool):
         self._auto = on
-        self.btn_auto.setText("자동갱신 ●" if on else "자동갱신 ○")
+        self.btn_auto.setText("● 자동 로드  ON" if on else "○ 자동 로드  OFF")
         self.btn_auto.setObjectName("AutoToggleOn" if on else "AutoToggleOff")
         self.btn_auto.style().unpolish(self.btn_auto)
         self.btn_auto.style().polish(self.btn_auto)
@@ -5120,7 +5202,7 @@ class UpdatePanel(QWidget):
             )
         finally:
             self.btn_ver.setEnabled(True)
-            self.btn_ver.setText("⬆ 업데이트 확인")
+            self.btn_ver.setText("🔍 버전 확인")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
