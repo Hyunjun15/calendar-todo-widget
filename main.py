@@ -3757,6 +3757,7 @@ class TaskSection(QWidget):
         total, done = self.db.get_task_stats(self.task_type)
         self.lbl_stats.setText(f"{done}/{total} 완료")
         self.prog.setValue(int(done/total*100) if total else 0)
+        tasks = self._apply_sort(tasks)
         if not tasks:
             self.empty_lbl.show()
         else:
@@ -3770,6 +3771,10 @@ class TaskSection(QWidget):
                 w.delete_requested.connect(self._delete)
                 w.log_requested.connect(self._log)
                 w.edit_requested.connect(self._edit)
+                if hasattr(w, "batch_select_changed"):
+                    w.batch_select_changed.connect(self._on_batch_select)
+                if self._batch_mode:
+                    w.show_batch_mode(True)
                 self.items_lay.addWidget(w)
 
     def _add(self, preset_date: date = None):
@@ -3901,6 +3906,87 @@ class TaskSection(QWidget):
                 self._indicator.setGeometry(8, y, self.body.width() - 16, 2)
         self._indicator.show()
         self._indicator.raise_()
+
+    # ── 정렬 ──────────────────────────────────────────────────────────────────
+    def _on_sort_changed(self):
+        self._sort_mode = self.cb_sort.currentData()
+        self.refresh()
+
+    def _apply_sort(self, tasks: list) -> list:
+        mode = self._sort_mode
+        if mode == "due_asc":
+            return sorted(tasks, key=lambda t: t["due_date"] or "9999-99-99")
+        if mode == "due_desc":
+            return sorted(tasks, key=lambda t: t["due_date"] or "0000-00-00", reverse=True)
+        if mode == "priority":
+            return sorted(tasks, key=lambda t: t["priority"])
+        if mode == "created_asc":
+            return sorted(tasks, key=lambda t: t["created_at"])
+        if mode == "created_desc":
+            return sorted(tasks, key=lambda t: t["created_at"], reverse=True)
+        if mode == "title":
+            return sorted(tasks, key=lambda t: (t["title"] or "").lower())
+        return list(tasks)   # "default" → DB 순서 유지
+
+    # ── 배치 선택 모드 ────────────────────────────────────────────────────────
+    def _toggle_batch_mode(self):
+        self._batch_mode = not self._batch_mode
+        self._batch_selected.clear()
+        self.batch_bar.setVisible(self._batch_mode)
+        self.btn_batch.setText("☑" if self._batch_mode else "☐")
+        self.lbl_batch_count.setText("0개 선택")
+        for i in range(self.items_lay.count()):
+            w = self.items_lay.itemAt(i).widget()
+            if w and hasattr(w, "show_batch_mode"):
+                w.show_batch_mode(self._batch_mode)
+
+    def _on_batch_select(self, tid: int, checked: bool):
+        if checked:
+            self._batch_selected.add(tid)
+        else:
+            self._batch_selected.discard(tid)
+        self.lbl_batch_count.setText(f"{len(self._batch_selected)}개 선택")
+
+    def _batch_select_all(self):
+        self._batch_selected.clear()
+        for i in range(self.items_lay.count()):
+            w = self.items_lay.itemAt(i).widget()
+            if w and hasattr(w, "_id") and w.isVisible():
+                self._batch_selected.add(w._id)
+                if hasattr(w, "_batch_chk"):
+                    w._batch_chk.setChecked(True)
+        self.lbl_batch_count.setText(f"{len(self._batch_selected)}개 선택")
+
+    def _batch_complete(self):
+        if not self._batch_selected:
+            return
+        for tid in list(self._batch_selected):
+            self.db.toggle_complete(tid, True)
+        self._batch_selected.clear()
+        self._batch_mode = False
+        self.batch_bar.setVisible(False)
+        self.btn_batch.setText("☐")
+        self.refresh()
+        self.completion_changed.emit()
+
+    def _batch_delete(self):
+        if not self._batch_selected:
+            return
+        count = len(self._batch_selected)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("삭제 확인")
+        msg.setText(f"선택한 {count}개 항목을 삭제하시겠습니까?")
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.No)
+        if msg.exec() != QMessageBox.StandardButton.Yes:
+            return
+        for tid in list(self._batch_selected):
+            self.db.delete_task(tid)
+        self._batch_selected.clear()
+        self._batch_mode = False
+        self.batch_bar.setVisible(False)
+        self.btn_batch.setText("☐")
+        self.refresh()
 
     def set_filter(self, query: str) -> int:
         """검색어로 태스크 필터링. 표시된 항목 수 반환."""
