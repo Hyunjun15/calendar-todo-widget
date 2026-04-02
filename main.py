@@ -1512,52 +1512,41 @@ class CalDayButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # ── 기간 바 (개인 일정 기간 표시) ───────────────────────
-        bar_h  = 4
+        # ── 기간 바 (개인 일정 기간 표시) — 균일 전체 너비 ────────
+        bar_h   = 5
         bar_gap = 2
-        # 기간 바는 날짜 텍스트 아래부터 시작 (y=20)
         bar_y_start = 20
-        for i, (color, pos) in enumerate(self._period_bars[:5]):
+        w = self.width()
+        for i, (color, pos) in enumerate(self._period_bars[:4]):
             y = bar_y_start + i * (bar_h + bar_gap)
-            c = QColor(color); c.setAlpha(200)
+            c = QColor(color); c.setAlpha(210)
             painter.setBrush(c)
             painter.setPen(Qt.PenStyle.NoPen)
-            w = self.width()
-            if pos == "start":
-                # 오른쪽 절반만 + 왼쪽 둥근 모서리
-                painter.drawRoundedRect(w // 2, y, w // 2, bar_h, 2, 2)
-                painter.drawRect(w // 2 + 2, y, w // 2 - 2, bar_h)
-            elif pos == "end":
-                # 왼쪽 절반만 + 오른쪽 둥근 모서리
-                painter.drawRoundedRect(0, y, w // 2, bar_h, 2, 2)
-                painter.drawRect(0, y, w // 2 - 2, bar_h)
-            elif pos == "single":
-                # 양쪽 둥근 모서리
-                painter.drawRoundedRect(4, y, w - 8, bar_h, 2, 2)
-            else:  # middle
-                # 가득 채움 (양끝 연결)
-                painter.drawRect(0, y, w, bar_h)
+            # 모든 위치(start/middle/end/single) 동일한 전체 너비 바
+            painter.drawRoundedRect(2, y, w - 4, bar_h, 2, 2)
 
-        # ── 일반 이벤트 도트 ────────────────────────────────────
+        # ── 원형 이벤트 도트 (기간 바로 표시된 타입 제외) ────────
         dots = []
         for et in [SCHED_TRIP, SCHED_VACATION, SCHED_TRAINING, SCHED_SINGLE]:
             if et in self._event_types:
                 dots.append(SCHED_COLORS[et])
-        if self._has_personal:
+        if self._has_personal and not self._period_bars:
+            # 기간 바가 없을 때만 개인 일정 도트 표시 (바와 중복 방지)
             dots.append(PERSONAL_CAL_COLOR)
         if self._has_cowork:
             dots.append(KAKAOWORK_CAL_COLOR)
 
         if dots:
-            dw, dh, gap = 5, 3, 2
-            total = len(dots) * dw + (len(dots) - 1) * gap
+            d = 6          # 원형 지름
+            gap = 3
+            total = len(dots) * d + (len(dots) - 1) * gap
             x = (self.width() - total) // 2
-            y = self.height() - 6
+            y = self.height() - 8
             for color in dots:
                 painter.setBrush(QColor(color))
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawRoundedRect(x, y, dw, dh, 1, 1)
-                x += dw + gap
+                painter.drawEllipse(x, y, d, d)
+                x += d + gap
 
         painter.end()
 
@@ -1798,13 +1787,27 @@ class EventPopup(QWidget):
 
         self.adjustSize()
 
-        x = btn_global_pos.x() - self.width() - 14
-        y = btn_global_pos.y()
         from PySide6.QtGui import QGuiApplication
+        from PySide6.QtCore import QPoint as _QPoint
         tgt_screen = QGuiApplication.screenAt(btn_global_pos)
         screen_geo = (tgt_screen if tgt_screen else QGuiApplication.primaryScreen()).availableGeometry()
-        if x < screen_geo.left():
-            x = btn_global_pos.x() + 40
+
+        # 팝업은 항상 메인 창 왼쪽 밖에 표시 — 달력 셀을 가리지 않음
+        parent_win = self.parent()
+        if parent_win is not None:
+            win_left  = parent_win.mapToGlobal(_QPoint(0, 0)).x()
+            win_right = parent_win.mapToGlobal(_QPoint(parent_win.width(), 0)).x()
+            x = win_left - self.width() - 8
+            if x < screen_geo.left():
+                # 왼쪽 공간 부족 → 메인 창 오른쪽 밖
+                x = win_right + 8
+        else:
+            x = btn_global_pos.x() - self.width() - 14
+            if x < screen_geo.left():
+                x = btn_global_pos.x() + 40
+
+        # Y: 호버 버튼 위치 기준, 화면 아래 넘치면 위로 밀어올림
+        y = btn_global_pos.y()
         if y + self.height() > screen_geo.bottom():
             y = screen_geo.bottom() - self.height() - 10
         if x + self.width() > screen_geo.right():
@@ -1933,6 +1936,9 @@ class CalendarWidget(QWidget):
 
         self.day_grid = QGridLayout()
         self.day_grid.setSpacing(2)
+        self.day_grid.setColumnStretch(0, 1)
+        for _ci in range(7):
+            self.day_grid.setColumnStretch(_ci, 1)
         lay.addLayout(self.day_grid)
 
         # ── 팀 일정 패널 (날짜 클릭 시 표시) ────────────────────────────
@@ -1983,6 +1989,7 @@ class CalendarWidget(QWidget):
 
             # 기간 일정 바 계산 (개인 직접 추가 일정만, iCal 제외)
             period_bars = []
+            period_bar_types = set()
             for r in self._sched_map.get(ds, []):
                 if not r["end_date"] or r["end_date"] == r["event_date"]:
                     continue  # 단일일 일정은 도트로만 표시
@@ -2001,14 +2008,18 @@ class CalendarWidget(QWidget):
                 else:
                     pos = "middle"
                 period_bars.append((color, pos))
+                period_bar_types.add(r["event_type"])
+
+            # 기간 바로 이미 표시되는 이벤트 타입은 도트에서 제외 (중복 방지)
+            dot_sched_types = [et for et in sched_types if et not in period_bar_types]
 
             btn = CalDayButton(d_num, d,
-                               event_types=list(set(sched_types)),
+                               event_types=list(set(dot_sched_types)),
                                has_personal=has_personal,
                                has_deadline=has_deadline,
                                has_cowork=has_cowork,
                                period_bars=period_bars)
-            btn.setFixedSize(38, 58)  # 5개 항목 기준 높이
+            btn.setMinimumSize(36, 58)  # 너비 유연 (그리드가 자동 분배)
             btn.clicked.connect(lambda _, dt=d: self._click(dt))
             btn.double_clicked.connect(lambda _, dt=d: self.add_schedule_requested.emit(dt))
             btn.hovered.connect(self._on_hover)
@@ -2772,7 +2783,7 @@ class TaskDialog(_MovableDialog):
         self._linked_todo_id: int | None = None
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumWidth(460)
+        self.setMinimumSize(460, 400)
         self._build()
         if self._is_edit:
             self._load()
@@ -3218,7 +3229,8 @@ class LogDialog(_MovableDialog):
         self._task = db.get_task(task_id)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.resize(620, 680)
+        self.setMinimumSize(560, 500)
+        self.resize(720, 740)
         self._cur_tab = "general"   # "general" | "progress"
         self._log_attach_path = ""
         self._build()
@@ -3363,7 +3375,7 @@ class LogDialog(_MovableDialog):
         self.log_lay.setSpacing(6)
         self.log_lay.addStretch()
         self.scroll_general.setWidget(self.log_cont)
-        self.scroll_general.setMinimumHeight(150)
+        self.scroll_general.setMinimumHeight(200)
         pg_lay.addWidget(self.scroll_general, 1)
 
         sep_g = QFrame(); sep_g.setFrameShape(QFrame.Shape.HLine)
@@ -3373,7 +3385,8 @@ class LogDialog(_MovableDialog):
         pg_lay.addWidget(self._mk_lbl("새 메모 작성 (Ctrl+Enter 저장)", "FormLabel"))
         self.ed = QPlainTextEdit()
         self.ed.setPlaceholderText("내용 입력...")
-        self.ed.setMaximumHeight(80)
+        self.ed.setMinimumHeight(80)
+        self.ed.setMaximumHeight(160)
         pg_lay.addWidget(self.ed)
 
         fa = QHBoxLayout(); fa.setSpacing(6)
@@ -3428,7 +3441,7 @@ class LogDialog(_MovableDialog):
         self.prog_lay.setSpacing(8)
         self.prog_lay.addStretch()
         self.scroll_progress.setWidget(self.prog_cont)
-        self.scroll_progress.setMinimumHeight(150)
+        self.scroll_progress.setMinimumHeight(200)
         pp_lay.addWidget(self.scroll_progress, 1)
 
     def _mk_lbl(self, text, obj, font=None):
@@ -4126,14 +4139,20 @@ class _UrgentLinkDialog(_MovableDialog):
         self.accept()
 
     def _save_general(self):
-        """연결 없음: 선택한 과제의 일반 로그에 기록"""
+        """연결 없음: 선택한 과제의 과제진행상황에 progress_group으로 기록"""
         todo_id = self.combo.currentData()
         if todo_id is not None:
             note = self.ed.toPlainText().strip()
-            content = f"[긴급업무 완료] {self._urgent['title']}"
+            today = date.today().strftime("%m/%d")
+            grp_title = f"{self._urgent['title']} ({today})"
+            grp_id = self.db.add_progress_group(
+                todo_id, grp_title,
+                source_urgent_id=self._urgent["id"]
+            )
+            base_content = "긴급업무 완료"
             if note:
-                content += f"\n{note}"
-            self.db.add_log(todo_id, content)
+                base_content += f": {note}"
+            self.db.add_progress_log(todo_id, grp_id, base_content)
         self.accept()
 
 
@@ -4959,15 +4978,17 @@ class UpdatePanel(QWidget):
         self.btn_auto.toggled.connect(self._toggle_auto)
         lay.addWidget(self.btn_auto)
 
-        self.btn_refresh = QPushButton("🔄 캘린더 & 버전 업데이트")
+        self.btn_refresh = QPushButton("🔄 갱신")
         self.btn_refresh.setObjectName("RefreshBtn")
         self.btn_refresh.setFixedHeight(26)
+        self.btn_refresh.setToolTip("캘린더 & 버전 업데이트")
         self.btn_refresh.clicked.connect(self.do_update)
         lay.addWidget(self.btn_refresh)
 
-        self.btn_ver = QPushButton("⬆ 업데이트 확인")
+        self.btn_ver = QPushButton("⬆ 업데이트")
         self.btn_ver.setObjectName("RefreshBtn")
         self.btn_ver.setFixedHeight(26)
+        self.btn_ver.setToolTip("GitHub 최신 버전 확인")
         self.btn_ver.clicked.connect(self._check_github_version)
         lay.addWidget(self.btn_ver)
 
@@ -5501,7 +5522,9 @@ class OptionsDialog(_MovableDialog):
         self.spin_fontsize.setFixedWidth(90)
         self.spin_fontsize.valueChanged.connect(self._on_fontsize)
         fs_row.addWidget(self.spin_fontsize)
-        fs_row.addWidget(QLabel("(기본: 10pt)"))
+        fs_rec = QLabel("권장: 10–11pt  (캘린더 깨짐 방지)")
+        fs_rec.setStyleSheet("color:#6c7086;font-size:11px;")
+        fs_row.addWidget(fs_rec)
         fs_row.addStretch()
         lay.addLayout(fs_row)
 
@@ -5527,6 +5550,9 @@ class OptionsDialog(_MovableDialog):
         self.spin_width.setFixedWidth(100)
         self.spin_width.valueChanged.connect(lambda v: self.settings.setValue("window_width", v))
         w_row.addWidget(self.spin_width)
+        w_rec = QLabel("권장: 680–780px  (캘린더 셀 충분 확보)")
+        w_rec.setStyleSheet("color:#6c7086;font-size:11px;")
+        w_row.addWidget(w_rec)
         w_row.addStretch()
         lay.addLayout(w_row)
 
