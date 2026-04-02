@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.3"
+APP_VERSION      = "v3.4"
 APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
@@ -3316,11 +3316,16 @@ class ProgressEntryRow(QWidget):
         self._build()
 
     def _build(self):
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 2, 0, 2)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+
+        # ── 뷰 행: 라벨 + 타임스탬프 + 버튼 ─────────────────────────────
+        self._view_row = QWidget()
+        lay = QHBoxLayout(self._view_row)
+        lay.setContentsMargins(0, 3, 0, 3)
         lay.setSpacing(4)
 
-        # 뷰 모드 — 내용 라벨
         self._lbl = QLabel(f"• {self._content}")
         self._lbl.setObjectName("LogContent")
         self._lbl.setWordWrap(True)
@@ -3331,75 +3336,73 @@ class ProgressEntryRow(QWidget):
         )
         lay.addWidget(self._lbl, 1)
 
-        # 편집 모드 — QLineEdit (기본 숨김)
-        self._ed = QLineEdit(self._content)
-        self._ed.setMaximumHeight(26)
-        self._ed.setVisible(False)
-        self._ed.returnPressed.connect(self._save)
-        lay.addWidget(self._ed, 1)
-
-        # 타임스탬프
         self._ts_lbl = QLabel(self._ts)
         self._ts_lbl.setObjectName("LogTimestamp")
         self._ts_lbl.setStyleSheet("font-size:9px;color:#45475a;background:transparent;")
         lay.addWidget(self._ts_lbl)
 
-        # ✏ 편집 버튼 (뷰 모드)
         self._btn_edit = QPushButton("✏")
         self._btn_edit.setObjectName("LogDeleteBtn")
-        self._btn_edit.setFixedSize(20, 20)
-        self._btn_edit.setToolTip("수정 (클릭)")
+        self._btn_edit.setFixedSize(22, 22)
+        self._btn_edit.setToolTip("수정")
         self._btn_edit.clicked.connect(self._start_edit)
         lay.addWidget(self._btn_edit)
 
-        # ✔ 저장 버튼 (편집 모드, 기본 숨김)
-        self._btn_save = QPushButton("✔")
-        self._btn_save.setObjectName("PrimaryBtn")
-        self._btn_save.setFixedSize(20, 20)
-        self._btn_save.setToolTip("저장 (Enter)")
-        self._btn_save.setVisible(False)
-        self._btn_save.clicked.connect(self._save)
-        lay.addWidget(self._btn_save)
-
-        # ✖ 취소 버튼 (편집 모드, 기본 숨김)
-        self._btn_cancel = QPushButton("✖")
-        self._btn_cancel.setObjectName("LogDeleteBtn")
-        self._btn_cancel.setFixedSize(20, 20)
-        self._btn_cancel.setToolTip("취소")
-        self._btn_cancel.setVisible(False)
-        self._btn_cancel.clicked.connect(self._cancel)
-        lay.addWidget(self._btn_cancel)
-
-        # ✕ 삭제 버튼 (뷰 모드)
         self._btn_del = QPushButton("✕")
         self._btn_del.setObjectName("LogDeleteBtn")
-        self._btn_del.setFixedSize(20, 20)
+        self._btn_del.setFixedSize(22, 22)
         self._btn_del.setToolTip("삭제")
         self._btn_del.clicked.connect(lambda: self.delete_requested.emit(self._id))
         lay.addWidget(self._btn_del)
 
+        outer.addWidget(self._view_row)
+
+        # ── 편집 행: QLineEdit + 저장/취소 버튼 (기본 숨김) ──────────────
+        self._edit_row = QWidget()
+        self._edit_row.setVisible(False)
+        elay = QHBoxLayout(self._edit_row)
+        elay.setContentsMargins(0, 2, 0, 2)
+        elay.setSpacing(4)
+
+        self._ed = QLineEdit(self._content)
+        self._ed.setMinimumHeight(32)
+        self._ed.setStyleSheet(
+            "QLineEdit{background:#1e1e2e;border:1px solid #89b4fa;"
+            "border-radius:4px;padding:2px 6px;font-size:11px;color:#cdd6f4;}"
+        )
+        self._ed.returnPressed.connect(self._save)
+        elay.addWidget(self._ed, 1)
+
+        self._btn_save = QPushButton("저장")
+        self._btn_save.setObjectName("PrimaryBtn")
+        self._btn_save.setFixedHeight(32)
+        self._btn_save.setFixedWidth(46)
+        self._btn_save.setToolTip("저장 (Enter)")
+        self._btn_save.clicked.connect(self._save)
+        elay.addWidget(self._btn_save)
+
+        self._btn_cancel = QPushButton("취소")
+        self._btn_cancel.setObjectName("SecondaryBtn")
+        self._btn_cancel.setFixedHeight(32)
+        self._btn_cancel.setFixedWidth(46)
+        self._btn_cancel.setToolTip("취소")
+        self._btn_cancel.clicked.connect(self._cancel)
+        elay.addWidget(self._btn_cancel)
+
+        outer.addWidget(self._edit_row)
+
     def _start_edit(self):
         self._editing = True
         self._ed.setText(self._content)
-        self._lbl.setVisible(False)
-        self._ed.setVisible(True)
-        self._ts_lbl.setVisible(False)
-        self._btn_edit.setVisible(False)
-        self._btn_del.setVisible(False)
-        self._btn_save.setVisible(True)
-        self._btn_cancel.setVisible(True)
+        self._view_row.setVisible(False)
+        self._edit_row.setVisible(True)
         self._ed.setFocus()
         self._ed.selectAll()
 
     def _cancel(self):
         self._editing = False
-        self._ed.setVisible(False)
-        self._btn_save.setVisible(False)
-        self._btn_cancel.setVisible(False)
-        self._lbl.setVisible(True)
-        self._ts_lbl.setVisible(True)
-        self._btn_edit.setVisible(True)
-        self._btn_del.setVisible(True)
+        self._edit_row.setVisible(False)
+        self._view_row.setVisible(True)
 
     def _save(self):
         new_text = self._ed.text().strip()
@@ -3578,17 +3581,24 @@ class LogDialog(_MovableDialog):
         self.scroll_general.setMinimumHeight(80)
         splitter_g.addWidget(self.scroll_general)
 
-        # 아래쪽: 입력 패널
+        # 아래쪽: 입력 패널 (최대 높이 고정 → 로그 목록이 대부분의 공간 차지)
         input_panel = QWidget()
+        input_panel.setMaximumHeight(196)      # 입력 영역 상한선
         inp_lay = QVBoxLayout(input_panel)
-        inp_lay.setContentsMargins(0, 8, 0, 0)
-        inp_lay.setSpacing(6)
+        inp_lay.setContentsMargins(0, 6, 0, 0)
+        inp_lay.setSpacing(5)
 
-        inp_lay.addWidget(self._mk_lbl("새 메모 작성 (Ctrl+Enter 저장)", "FormLabel"))
+        inp_hdr = QHBoxLayout()
+        inp_hdr.addWidget(self._mk_lbl("✏  새 메모 작성", "FormLabel"))
+        inp_hdr.addStretch()
+        inp_hdr.addWidget(self._mk_lbl("Ctrl+Enter 저장", "LogTimestamp"))
+        inp_lay.addLayout(inp_hdr)
+
         self.ed = QPlainTextEdit()
-        self.ed.setPlaceholderText("내용 입력... (여러 줄 가능)")
-        self.ed.setMinimumHeight(60)
-        inp_lay.addWidget(self.ed, 1)
+        self.ed.setPlaceholderText("내용을 입력하세요... (여러 줄 가능)")
+        self.ed.setMinimumHeight(72)
+        self.ed.setMaximumHeight(96)           # 텍스트 에디터 최대 높이 고정
+        inp_lay.addWidget(self.ed)
 
         fa = QHBoxLayout(); fa.setSpacing(6)
         self.lbl_attach = QLabel("📎 파일 없음")
@@ -3596,27 +3606,25 @@ class LogDialog(_MovableDialog):
         fa.addWidget(self.lbl_attach, 1)
         btn_attach = QPushButton("📂 첨부")
         btn_attach.setObjectName("SecondaryBtn")
-        btn_attach.setFixedHeight(28)
+        btn_attach.setFixedHeight(26)
         btn_attach.clicked.connect(self._browse_attach)
         fa.addWidget(btn_attach)
         btn_detach = QPushButton("✕")
         btn_detach.setObjectName("LogDeleteBtn")
-        btn_detach.setFixedSize(28, 28)
+        btn_detach.setFixedSize(26, 26)
         btn_detach.clicked.connect(self._clear_attach)
         fa.addWidget(btn_detach)
-        inp_lay.addLayout(fa)
 
-        br_g = QHBoxLayout(); br_g.addStretch()
         ba_g = QPushButton("메모 추가")
         ba_g.setObjectName("PrimaryBtn")
-        ba_g.setFixedHeight(34)
+        ba_g.setFixedHeight(26)
         ba_g.clicked.connect(self._add_general)
-        br_g.addWidget(ba_g)
-        inp_lay.addLayout(br_g)
+        fa.addWidget(ba_g)
+        inp_lay.addLayout(fa)
 
         splitter_g.addWidget(input_panel)
-        splitter_g.setStretchFactor(0, 3)   # 로그 목록 75%
-        splitter_g.setStretchFactor(1, 1)   # 입력창 25%
+        splitter_g.setStretchFactor(0, 1)   # 로그 목록이 남은 공간 전부 차지
+        splitter_g.setStretchFactor(1, 0)   # 입력 패널은 최소 크기 유지
         pg_lay.addWidget(splitter_g, 1)
 
         # ── 과제진행상황 패널 ─────────────────────────────────────────────
@@ -3841,12 +3849,17 @@ class LogDialog(_MovableDialog):
 
         add_row = QHBoxLayout(); add_row.setSpacing(6)
         ed_entry = QLineEdit()
-        ed_entry.setPlaceholderText("새 항목 입력 후 Enter 또는 추가 버튼...")
-        ed_entry.setMaximumHeight(28)
+        ed_entry.setPlaceholderText("새 항목 입력 후 Enter 또는 ＋ 버튼...")
+        ed_entry.setMinimumHeight(34)
+        ed_entry.setStyleSheet(
+            "QLineEdit{background:#1e1e2e;border:1px solid #45475a;"
+            "border-radius:4px;padding:2px 8px;font-size:11px;color:#cdd6f4;}"
+            "QLineEdit:focus{border:1px solid #89b4fa;}"
+        )
         add_row.addWidget(ed_entry, 1)
         btn_add_entry = QPushButton("＋ 추가")
         btn_add_entry.setObjectName("PrimaryBtn")
-        btn_add_entry.setFixedHeight(28)
+        btn_add_entry.setFixedHeight(34)
         btn_add_entry.clicked.connect(
             lambda _=None, e=ed_entry, g=gid: self._add_progress_entry(e, g)
         )
