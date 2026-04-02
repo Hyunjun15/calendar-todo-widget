@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.2"
+APP_VERSION      = "v3.3"
 APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
@@ -927,6 +927,22 @@ class Database:
         )
         self.conn.commit()
         return cur.lastrowid
+
+    def update_progress_group_title(self, group_id: int, title: str):
+        self.conn.execute(
+            "UPDATE progress_groups SET title=? WHERE id=?", (title, group_id)
+        )
+        self.conn.commit()
+
+    def update_progress_log(self, log_id: int, content: str):
+        self.conn.execute(
+            "UPDATE task_logs SET content=? WHERE id=?", (content, log_id)
+        )
+        self.conn.commit()
+
+    def delete_progress_log(self, log_id: int):
+        self.conn.execute("DELETE FROM task_logs WHERE id=?", (log_id,))
+        self.conn.commit()
 
     def get_general_logs(self, task_id: int) -> list:
         """일반 로그만 반환 (log_type='general' 또는 NULL)"""
@@ -3286,6 +3302,115 @@ class LogItemWidget(QFrame):
             self._enter_edit()
 
 
+class ProgressEntryRow(QWidget):
+    """과제진행상황 개별 항목 행 — 보기/편집 인라인 전환"""
+    delete_requested = Signal(int)       # log_id
+    edit_done        = Signal(int, str)  # log_id, new_content
+
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self._id      = entry["id"]
+        self._content = entry["content"]
+        self._ts      = (entry["created_at"] or "")[:16]
+        self._editing = False
+        self._build()
+
+    def _build(self):
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 2)
+        lay.setSpacing(4)
+
+        # 뷰 모드 — 내용 라벨
+        self._lbl = QLabel(f"• {self._content}")
+        self._lbl.setObjectName("LogContent")
+        self._lbl.setWordWrap(True)
+        self._lbl.setStyleSheet("background:transparent;padding-left:4px;font-size:11px;")
+        self._lbl.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse |
+            Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        lay.addWidget(self._lbl, 1)
+
+        # 편집 모드 — QLineEdit (기본 숨김)
+        self._ed = QLineEdit(self._content)
+        self._ed.setMaximumHeight(26)
+        self._ed.setVisible(False)
+        self._ed.returnPressed.connect(self._save)
+        lay.addWidget(self._ed, 1)
+
+        # 타임스탬프
+        self._ts_lbl = QLabel(self._ts)
+        self._ts_lbl.setObjectName("LogTimestamp")
+        self._ts_lbl.setStyleSheet("font-size:9px;color:#45475a;background:transparent;")
+        lay.addWidget(self._ts_lbl)
+
+        # ✏ 편집 버튼 (뷰 모드)
+        self._btn_edit = QPushButton("✏")
+        self._btn_edit.setObjectName("LogDeleteBtn")
+        self._btn_edit.setFixedSize(20, 20)
+        self._btn_edit.setToolTip("수정 (클릭)")
+        self._btn_edit.clicked.connect(self._start_edit)
+        lay.addWidget(self._btn_edit)
+
+        # ✔ 저장 버튼 (편집 모드, 기본 숨김)
+        self._btn_save = QPushButton("✔")
+        self._btn_save.setObjectName("PrimaryBtn")
+        self._btn_save.setFixedSize(20, 20)
+        self._btn_save.setToolTip("저장 (Enter)")
+        self._btn_save.setVisible(False)
+        self._btn_save.clicked.connect(self._save)
+        lay.addWidget(self._btn_save)
+
+        # ✖ 취소 버튼 (편집 모드, 기본 숨김)
+        self._btn_cancel = QPushButton("✖")
+        self._btn_cancel.setObjectName("LogDeleteBtn")
+        self._btn_cancel.setFixedSize(20, 20)
+        self._btn_cancel.setToolTip("취소")
+        self._btn_cancel.setVisible(False)
+        self._btn_cancel.clicked.connect(self._cancel)
+        lay.addWidget(self._btn_cancel)
+
+        # ✕ 삭제 버튼 (뷰 모드)
+        self._btn_del = QPushButton("✕")
+        self._btn_del.setObjectName("LogDeleteBtn")
+        self._btn_del.setFixedSize(20, 20)
+        self._btn_del.setToolTip("삭제")
+        self._btn_del.clicked.connect(lambda: self.delete_requested.emit(self._id))
+        lay.addWidget(self._btn_del)
+
+    def _start_edit(self):
+        self._editing = True
+        self._ed.setText(self._content)
+        self._lbl.setVisible(False)
+        self._ed.setVisible(True)
+        self._ts_lbl.setVisible(False)
+        self._btn_edit.setVisible(False)
+        self._btn_del.setVisible(False)
+        self._btn_save.setVisible(True)
+        self._btn_cancel.setVisible(True)
+        self._ed.setFocus()
+        self._ed.selectAll()
+
+    def _cancel(self):
+        self._editing = False
+        self._ed.setVisible(False)
+        self._btn_save.setVisible(False)
+        self._btn_cancel.setVisible(False)
+        self._lbl.setVisible(True)
+        self._ts_lbl.setVisible(True)
+        self._btn_edit.setVisible(True)
+        self._btn_del.setVisible(True)
+
+    def _save(self):
+        new_text = self._ed.text().strip()
+        if not new_text:
+            return
+        self._content = new_text
+        self._lbl.setText(f"• {new_text}")
+        self.edit_done.emit(self._id, new_text)
+        self._cancel()
+
+
 class LogDialog(_MovableDialog):
     """진행 로그 다이얼로그 — 좌측 사이드바 탭 (일반사항 / 과제진행상황)"""
 
@@ -3603,52 +3728,130 @@ class LogDialog(_MovableDialog):
         cl.setContentsMargins(12, 10, 12, 10)
         cl.setSpacing(6)
 
-        # 헤더 행: 제목 + 날짜 + 삭제
-        hdr = QHBoxLayout()
+        gid = grp["id"]
+
+        # ── 헤더 행 ──────────────────────────────────────────────────────
+        hdr = QHBoxLayout(); hdr.setSpacing(4)
+
+        # 그룹 제목 (뷰/편집 인라인 전환)
         title_lbl = QLabel(f"▶ {grp['title']}")
         title_lbl.setObjectName("TaskTitle")
         title_lbl.setStyleSheet("font-weight:bold;font-size:11px;background:transparent;")
         hdr.addWidget(title_lbl, 1)
+
+        title_ed = QLineEdit(grp["title"])
+        title_ed.setMaximumHeight(24)
+        title_ed.setVisible(False)
+        hdr.addWidget(title_ed, 1)
+
         date_lbl = QLabel(grp["created_at"][:10])
         date_lbl.setObjectName("LogTimestamp")
         date_lbl.setStyleSheet("font-size:10px;background:transparent;color:#6c7086;")
         hdr.addWidget(date_lbl)
+
+        # ✏ 제목 편집 버튼
+        btn_edit_title = QPushButton("✏")
+        btn_edit_title.setObjectName("LogDeleteBtn")
+        btn_edit_title.setFixedSize(20, 20)
+        btn_edit_title.setToolTip("그룹 제목 수정")
+        hdr.addWidget(btn_edit_title)
+
+        # ✔ 제목 저장 버튼 (편집 모드)
+        btn_save_title = QPushButton("✔")
+        btn_save_title.setObjectName("PrimaryBtn")
+        btn_save_title.setFixedSize(20, 20)
+        btn_save_title.setVisible(False)
+        btn_save_title.setToolTip("저장 (Enter)")
+        hdr.addWidget(btn_save_title)
+
+        # ✖ 제목 취소 버튼 (편집 모드)
+        btn_cancel_title = QPushButton("✖")
+        btn_cancel_title.setObjectName("LogDeleteBtn")
+        btn_cancel_title.setFixedSize(20, 20)
+        btn_cancel_title.setVisible(False)
+        btn_cancel_title.setToolTip("취소")
+        hdr.addWidget(btn_cancel_title)
+
+        # ✕ 그룹 삭제 버튼
         btn_del_grp = QPushButton("✕")
         btn_del_grp.setObjectName("LogDeleteBtn")
         btn_del_grp.setFixedSize(20, 20)
-        gid = grp["id"]
+        btn_del_grp.setToolTip("그룹 삭제")
         btn_del_grp.clicked.connect(lambda _=None, g=gid: self._del_group(g))
         hdr.addWidget(btn_del_grp)
+
         cl.addLayout(hdr)
 
-        # 기존 항목들
-        entries = self.db.get_progress_logs(grp["id"])
-        for entry in entries:
-            entry_lbl = QLabel(f"• {entry['content']}")
-            entry_lbl.setObjectName("LogContent")
-            entry_lbl.setWordWrap(True)
-            entry_lbl.setStyleSheet("background:transparent;padding-left:4px;")
-            entry_lbl.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse |
-                Qt.TextInteractionFlag.TextSelectableByKeyboard
-            )
-            cl.addWidget(entry_lbl)
+        # ── 그룹 제목 편집 로직 ──────────────────────────────────────────
+        def _enter_title_edit():
+            title_lbl.setVisible(False)
+            title_ed.setVisible(True)
+            btn_edit_title.setVisible(False)
+            btn_save_title.setVisible(True)
+            btn_cancel_title.setVisible(True)
+            date_lbl.setVisible(False)
+            btn_del_grp.setVisible(False)
+            title_ed.setFocus(); title_ed.selectAll()
 
-        # 새 항목 추가
+        def _cancel_title_edit():
+            title_ed.setVisible(False)
+            btn_save_title.setVisible(False)
+            btn_cancel_title.setVisible(False)
+            title_lbl.setVisible(True)
+            date_lbl.setVisible(True)
+            btn_edit_title.setVisible(True)
+            btn_del_grp.setVisible(True)
+
+        def _save_title():
+            new_t = title_ed.text().strip()
+            if new_t:
+                self.db.update_progress_group_title(gid, new_t)
+                title_lbl.setText(f"▶ {new_t}")
+            _cancel_title_edit()
+
+        btn_edit_title.clicked.connect(_enter_title_edit)
+        btn_save_title.clicked.connect(_save_title)
+        btn_cancel_title.clicked.connect(_cancel_title_edit)
+        title_ed.returnPressed.connect(_save_title)
+
+        # 구분선
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setMaximumHeight(1)
+        sep.setStyleSheet("background:#313244;margin:0 0;")
+        cl.addWidget(sep)
+
+        # ── 기존 항목들 (ProgressEntryRow) ──────────────────────────────
+        entries = self.db.get_progress_logs(gid)
+        for entry in entries:
+            row = ProgressEntryRow(entry, card)
+            row.delete_requested.connect(self._del_progress_entry)
+            row.edit_done.connect(self._edit_progress_entry)
+            cl.addWidget(row)
+
+        if not entries:
+            emp_lbl = QLabel("항목이 없습니다. 아래에서 추가하세요.")
+            emp_lbl.setStyleSheet("color:#45475a;font-size:10px;padding:2px 4px;")
+            cl.addWidget(emp_lbl)
+
+        # ── 새 항목 추가 행 ──────────────────────────────────────────────
+        add_sep = QFrame(); add_sep.setFrameShape(QFrame.Shape.HLine)
+        add_sep.setMaximumHeight(1)
+        add_sep.setStyleSheet("background:#313244;margin:2px 0;")
+        cl.addWidget(add_sep)
+
         add_row = QHBoxLayout(); add_row.setSpacing(6)
         ed_entry = QLineEdit()
-        ed_entry.setPlaceholderText("항목 추가...")
+        ed_entry.setPlaceholderText("새 항목 입력 후 Enter 또는 추가 버튼...")
         ed_entry.setMaximumHeight(28)
         add_row.addWidget(ed_entry, 1)
-        btn_add_entry = QPushButton("추가")
+        btn_add_entry = QPushButton("＋ 추가")
         btn_add_entry.setObjectName("PrimaryBtn")
         btn_add_entry.setFixedHeight(28)
-        btn_add_entry.setFixedWidth(50)
         btn_add_entry.clicked.connect(
-            lambda _=None, e=ed_entry, g=grp["id"]: self._add_progress_entry(e, g)
+            lambda _=None, e=ed_entry, g=gid: self._add_progress_entry(e, g)
         )
         ed_entry.returnPressed.connect(
-            lambda e=ed_entry, g=grp["id"]: self._add_progress_entry(e, g)
+            lambda e=ed_entry, g=gid: self._add_progress_entry(e, g)
         )
         add_row.addWidget(btn_add_entry)
         cl.addLayout(add_row)
@@ -3681,6 +3884,14 @@ class LogDialog(_MovableDialog):
         if r == QMessageBox.StandardButton.Yes:
             self.db.delete_progress_group(group_id)
             self._load_progress()
+
+    def _del_progress_entry(self, log_id: int):
+        self.db.delete_progress_log(log_id)
+        self._load_progress()
+
+    def _edit_progress_entry(self, log_id: int, new_content: str):
+        self.db.update_progress_log(log_id, new_content)
+        # ProgressEntryRow 가 자체 라벨을 즉시 업데이트하므로 reload 불필요
 
     def _browse_attach(self):
         path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "모든 파일 (*.*)")
