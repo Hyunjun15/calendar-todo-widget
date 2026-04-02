@@ -24,7 +24,7 @@ Update works 폴더의 날짜별 .txt 파일을 읽어
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
-import sys, os, re, calendar, sqlite3
+import sys, os, re, calendar, sqlite3, shutil
 import urllib.request, urllib.error
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -54,7 +54,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v2.25"
+APP_VERSION      = "v2.28"
 APP_VERSION_DATE = "2026-04-01"
 
 def resource_path(relative_path):
@@ -80,6 +80,7 @@ else:
 UPDATE_WORKS    = BASE_DIR / "Update works"
 ASSETS_DIR      = BASE_DIR / "assets"
 EXPORT_DIR      = BASE_DIR / "Export"
+ATTACHMENTS_DIR = Path.home() / ".productivity_widget" / "attachments"
 
 # 2) 내부 리소스 (아이콘 등 EXE 안에 박혀있는 파일들 - 나중에 필요 시 사용)
 # INTERNAL_ASSETS = Path(resource_path("assets"))
@@ -466,7 +467,17 @@ class Database:
                 source          TEXT    DEFAULT 'manual',
                 color           TEXT    DEFAULT NULL,
                 file_path       TEXT    DEFAULT NULL,
-                is_user_deleted INTEGER DEFAULT 0
+                is_user_deleted INTEGER DEFAULT 0,
+                linked_todo_id  INTEGER DEFAULT NULL
+            );
+            CREATE TABLE IF NOT EXISTS task_files (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id       INTEGER NOT NULL,
+                original_path TEXT    NOT NULL,
+                copy_path     TEXT    DEFAULT NULL,
+                filename      TEXT    NOT NULL,
+                added_at      TEXT    NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS task_logs (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -540,6 +551,27 @@ class Database:
         except sqlite3.OperationalError:
             pass
 
+        # linked_todo_id 컬럼 (긴급업무→과제 연결)
+        try:
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN linked_todo_id INTEGER DEFAULT NULL")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # task_files 테이블 마이그레이션
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS task_files (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id       INTEGER NOT NULL,
+                original_path TEXT    NOT NULL,
+                copy_path     TEXT    DEFAULT NULL,
+                filename      TEXT    NOT NULL,
+                added_at      TEXT    NOT NULL,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+        """)
+        self.conn.commit()
+
         # task_type CHECK 제약이 있는 구형 DB → 재생성
         try:
             self.conn.execute(
@@ -563,14 +595,15 @@ class Database:
                 completed_at TEXT DEFAULT NULL, sort_order INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'manual', color TEXT DEFAULT NULL,
                 file_path TEXT DEFAULT NULL,
-                is_user_deleted INTEGER DEFAULT 0
+                is_user_deleted INTEGER DEFAULT 0,
+                linked_todo_id INTEGER DEFAULT NULL
             );
             INSERT INTO tasks_v2
                 SELECT id,title,description,
                        COALESCE(goal,''), task_type, priority, due_date,
                        is_completed, created_at, completed_at, sort_order,
                        COALESCE(source,'manual'), NULL,
-                       COALESCE(is_user_deleted, 0)
+                       COALESCE(is_user_deleted, 0), NULL
                 FROM tasks;
             DROP TABLE tasks;
             ALTER TABLE tasks_v2 RENAME TO tasks;
@@ -580,12 +613,12 @@ class Database:
     # ── 태스크 CRUD ──────────────────────────────────────────────────────
     def add_task(self, title, description="", goal="", task_type=TASK_TODO,
                  priority=PRIORITY_MEDIUM, due_date=None, source=SOURCE_MANUAL,
-                 color=None, file_path=None) -> int:
+                 color=None, file_path=None, linked_todo_id=None) -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cur = self.conn.execute(
             "INSERT INTO tasks (title,description,goal,task_type,priority,"
-            "due_date,created_at,source,color,file_path) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (title, description, goal, task_type, priority, due_date, now, source, color, file_path)
+            "due_date,created_at,source,color,file_path,linked_todo_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (title, description, goal, task_type, priority, due_date, now, source, color, file_path, linked_todo_id)
         )
         self.conn.commit()
         return cur.lastrowid
@@ -643,6 +676,16 @@ class Database:
             self.conn.execute("DELETE FROM task_logs WHERE task_id=?", (task_id,))
             self.conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         self.conn.commit()
+
+    def get_linked_todo_title(self, urgent_task_id: int) -> str | None:
+        """긴급업무의 연결된 과제 제목 반환 (없으면 None)"""
+        row = self.conn.execute(
+            "SELECT t2.title FROM tasks t1 "
+            "JOIN tasks t2 ON t1.linked_todo_id=t2.id "
+            "WHERE t1.id=? AND t2.is_user_deleted=0",
+            (urgent_task_id,)
+        ).fetchone()
+        return row[0] if row else None
 
     def get_task_stats(self, task_type) -> tuple[int, int]:
         total = self.conn.execute(
@@ -710,6 +753,65 @@ class Database:
             (content, file_path or None, log_id)
         )
         self.conn.commit()
+
+    # ── 첨부 파일 CRUD ───────────────────────────────────────────────────────
+    def _ensure_attachments_dir(self):
+        ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def add_task_file(self, task_id: int, original_path: str) -> int:
+        """파일을 attachments 폴더에 복사하고 DB에 기록"""
+        self._ensure_attachments_dir()
+        src = Path(original_path)
+        filename = src.name
+        dst = ATTACHMENTS_DIR / f"task_{task_id}_{filename}"
+        copy_path = None
+        if src.exists():
+            try:
+                shutil.copy2(str(src), str(dst))
+                copy_path = str(dst)
+            except Exception:
+                pass
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = self.conn.execute(
+            "INSERT INTO task_files (task_id, original_path, copy_path, filename, added_at) "
+            "VALUES (?,?,?,?,?)",
+            (task_id, original_path, copy_path, filename, now)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_task_files(self, task_id: int) -> list:
+        return self.conn.execute(
+            "SELECT * FROM task_files WHERE task_id=? ORDER BY added_at ASC",
+            (task_id,)
+        ).fetchall()
+
+    def delete_task_file(self, file_id: int):
+        """DB에서 삭제 + copy_path 파일도 삭제"""
+        row = self.conn.execute(
+            "SELECT copy_path FROM task_files WHERE id=?", (file_id,)
+        ).fetchone()
+        if row and row["copy_path"]:
+            try:
+                Path(row["copy_path"]).unlink(missing_ok=True)
+            except Exception:
+                pass
+        self.conn.execute("DELETE FROM task_files WHERE id=?", (file_id,))
+        self.conn.commit()
+
+    def get_missing_file_tasks(self) -> list[dict]:
+        """original_path가 존재하지 않는 파일 목록 반환"""
+        rows = self.conn.execute(
+            "SELECT tf.id, tf.task_id, tf.filename, tf.original_path, tf.copy_path, "
+            "t.title as task_title "
+            "FROM task_files tf JOIN tasks t ON tf.task_id=t.id "
+            "WHERE t.is_user_deleted=0 AND t.is_completed=0"
+        ).fetchall()
+        missing = []
+        for r in rows:
+            if not Path(r["original_path"]).exists():
+                missing.append(dict(r))
+        return missing
 
     # ── 일정 CRUD ────────────────────────────────────────────────────────────
     def add_schedule(self, name, event_date, end_date=None, start_time=None,
@@ -1962,16 +2064,22 @@ class CalendarWidget(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TaskItemWidget(QFrame):
-    toggled          = Signal(int, bool)
-    delete_requested = Signal(int)
-    log_requested    = Signal(int)
-    edit_requested   = Signal(int)
+    toggled              = Signal(int, bool)
+    delete_requested     = Signal(int)
+    log_requested        = Signal(int)
+    edit_requested       = Signal(int)
+    navigate_requested   = Signal(int)
+    batch_select_changed = Signal(int, bool)
 
-    def __init__(self, task_row, highlight: bool = False, parent=None):
+    def __init__(self, task_row, highlight: bool = False, parent=None,
+                 linked_title: str | None = None, file_count: int = 0):
         super().__init__(parent)
-        self._id        = task_row["id"]
-        self._completed = bool(task_row["is_completed"])
-        self._file_path = task_row["file_path"] if task_row["file_path"] else None
+        self._id           = task_row["id"]
+        self._completed    = bool(task_row["is_completed"])
+        self._file_path    = task_row["file_path"] if task_row["file_path"] else None
+        self._linked_title = linked_title
+        self._file_count   = file_count
+        self._batch_chk: QCheckBox | None = None
         obj = "TaskItemCompleted" if self._completed else "TaskItem"
         self.setObjectName(obj)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2005,6 +2113,14 @@ class TaskItemWidget(QFrame):
         inner.setContentsMargins(8, 6, 0, 6)
         inner.setSpacing(8)
 
+        # 배치 선택 체크박스 (기본 숨김)
+        self._batch_chk = QCheckBox()
+        self._batch_chk.setObjectName("TaskCheck")
+        self._batch_chk.setFixedSize(22, 22)
+        self._batch_chk.setVisible(False)
+        self._batch_chk.toggled.connect(lambda v: self.batch_select_changed.emit(self._id, v))
+        inner.addWidget(self._batch_chk, 0, Qt.AlignmentFlag.AlignVCenter)
+
         # 체크박스
         self.chk = QCheckBox()
         self.chk.setObjectName("TaskCheck")
@@ -2017,6 +2133,16 @@ class TaskItemWidget(QFrame):
         txt = QVBoxLayout()
         txt.setSpacing(1)
         txt.setContentsMargins(0, 0, 0, 0)
+
+        # 연결 과제 표시 (긴급업무만)
+        if self._linked_title:
+            linked_lbl = QLabel(f"🔗 {self._linked_title}")
+            linked_lbl.setObjectName("LinkedTodoLabel")
+            linked_lbl.setStyleSheet("color:#89b4fa;font-size:9px;background:transparent;padding:0;")
+            linked_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            linked_id = r.get("linked_todo_id")
+            linked_lbl.mousePressEvent = lambda e, lid=linked_id: self.navigate_requested.emit(lid) if lid else None
+            txt.addWidget(linked_lbl)
 
         title_text = r["title"]
         title_lbl = QLabel(f"<s>{title_text}</s>" if self._completed else title_text)
@@ -2053,6 +2179,12 @@ class TaskItemWidget(QFrame):
             src_lbl = QLabel("📄 파일 가져옴")
             src_lbl.setObjectName("SourceBadge")
             txt.addWidget(src_lbl)
+
+        # 첨부 파일 뱃지
+        if self._file_count > 0:
+            file_badge = QLabel(f"📎 {self._file_count}개 파일")
+            file_badge.setObjectName("SourceBadge")
+            txt.addWidget(file_badge)
 
         inner.addLayout(txt, 1)
 
@@ -2135,6 +2267,15 @@ class TaskItemWidget(QFrame):
         drag.setPixmap(px)
         drag.setHotSpot(QPoint(px.width() // 2, 12))
         drag.exec(Qt.DropAction.MoveAction)
+
+    def show_batch_mode(self, enabled: bool):
+        if self._batch_chk:
+            if not enabled:
+                self._batch_chk.setChecked(False)
+            self._batch_chk.setVisible(enabled)
+
+    def is_batch_selected(self) -> bool:
+        return bool(self._batch_chk and self._batch_chk.isChecked())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2487,13 +2628,15 @@ class ScheduleDialog(_MovableDialog):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TaskDialog(_MovableDialog):
-    def __init__(self, parent=None, task_data=None, task_type=None, preset_date: date = None):
+    def __init__(self, parent=None, task_data=None, task_type=None, preset_date: date = None, db=None):
         super().__init__(parent)
         self._data        = task_data
         self._is_edit     = task_data is not None
         self._task_type   = task_type or (task_data["task_type"] if task_data else None)
         self._preset_date = preset_date
         self._selected_color: str | None = None
+        self._db          = db
+        self._linked_todo_id: int | None = None
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
         self.setMinimumWidth(460)
@@ -2606,34 +2749,41 @@ class TaskDialog(_MovableDialog):
             # 기본값 선택
             self._color_btns[0].setChecked(True)
 
-        # 파일/폴더 연결 (todo / urgent / misc)
+        # 첨부 파일 (여러 개)
         if self._task_type in (TASK_TODO, TASK_URGENT, TASK_MISC):
-            lay.addWidget(lbl("연결 파일/폴더 (선택)"))
-            fp_row = QHBoxLayout(); fp_row.setSpacing(6)
-            self.ed_fpath = QLineEdit()
-            self.ed_fpath.setPlaceholderText("파일 또는 폴더 경로 (직접 입력 또는 탐색)")
-            fp_row.addWidget(self.ed_fpath, 1)
-            btn_file = QPushButton("📄")
-            btn_file.setObjectName("SecondaryBtn")
-            btn_file.setFixedSize(34, 34)
-            btn_file.setToolTip("파일 선택")
-            btn_file.clicked.connect(self._browse_file)
-            fp_row.addWidget(btn_file)
-            btn_folder = QPushButton("📁")
-            btn_folder.setObjectName("SecondaryBtn")
-            btn_folder.setFixedSize(34, 34)
-            btn_folder.setToolTip("폴더 선택")
-            btn_folder.clicked.connect(self._browse_folder)
-            fp_row.addWidget(btn_folder)
-            btn_clr = QPushButton("✕")
-            btn_clr.setObjectName("TaskDeleteBtn")
-            btn_clr.setFixedSize(34, 34)
-            btn_clr.setToolTip("경로 지우기")
-            btn_clr.clicked.connect(lambda: self.ed_fpath.clear())
-            fp_row.addWidget(btn_clr)
-            lay.addLayout(fp_row)
+            lay.addWidget(lbl("첨부 파일 (여러 개 가능)"))
+            self._file_list_lay = QVBoxLayout()
+            self._file_list_lay.setSpacing(2)
+            self._file_list_lay.setContentsMargins(0, 0, 0, 0)
+            lay.addLayout(self._file_list_lay)
+            self._pending_files: list[str] = []
+            self._removed_file_ids: list[int] = []
+            self._existing_files: list = []
+
+            btn_add_file = QPushButton("📎  파일 추가")
+            btn_add_file.setObjectName("SecondaryBtn")
+            btn_add_file.setFixedHeight(32)
+            btn_add_file.clicked.connect(self._add_file)
+            lay.addWidget(btn_add_file)
+            self.ed_fpath = None
         else:
             self.ed_fpath = None
+            self._pending_files = []
+            self._removed_file_ids = []
+            self._existing_files = []
+            self._file_list_lay = None
+
+        # 긴급업무 연결 과제 선택
+        if self._task_type == TASK_URGENT and self._db is not None:
+            lay.addWidget(lbl("연결 과제 (선택)"))
+            self.cb_linked = QComboBox()
+            self.cb_linked.addItem("(연결 없음)", None)
+            todo_tasks = self._db.get_tasks(TASK_TODO, completed=False)
+            for tt in todo_tasks:
+                self.cb_linked.addItem(tt["title"], tt["id"])
+            lay.addWidget(self.cb_linked)
+        else:
+            self.cb_linked = None
 
         lay.addSpacing(4)
         btn_row = QHBoxLayout()
@@ -2661,6 +2811,49 @@ class TaskDialog(_MovableDialog):
         if path:
             self.ed_fpath.setText(path)
 
+    def _add_file(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, "파일 선택", "", "모든 파일 (*.*)")
+        for path in paths:
+            if path and path not in self._pending_files:
+                self._pending_files.append(path)
+                self._add_file_row(path, is_existing=False, file_id=None)
+
+    def _add_file_row(self, path: str, is_existing: bool, file_id: int | None):
+        if self._file_list_lay is None:
+            return
+        row_w = QWidget()
+        row_lay = QHBoxLayout(row_w)
+        row_lay.setContentsMargins(0, 0, 0, 0)
+        row_lay.setSpacing(4)
+
+        fname = Path(path).name
+        lbl_name = QLabel(f"📄 {fname}")
+        lbl_name.setObjectName("FormLabel")
+        lbl_name.setToolTip(path)
+        lbl_name.setWordWrap(False)
+        row_lay.addWidget(lbl_name, 1)
+
+        btn_rm = QPushButton("✕")
+        btn_rm.setObjectName("TaskDeleteBtn")
+        btn_rm.setFixedSize(22, 22)
+        if is_existing and file_id is not None:
+            fid = file_id
+            btn_rm.clicked.connect(lambda _, w=row_w, fid=fid, p=path: self._remove_existing_file(w, fid, p))
+        else:
+            btn_rm.clicked.connect(lambda _, w=row_w, p=path: self._remove_pending_file(w, p))
+        row_lay.addWidget(btn_rm)
+
+        self._file_list_lay.addWidget(row_w)
+
+    def _remove_pending_file(self, row_w, path: str):
+        if path in self._pending_files:
+            self._pending_files.remove(path)
+        row_w.deleteLater()
+
+    def _remove_existing_file(self, row_w, file_id: int, path: str):
+        self._removed_file_ids.append(file_id)
+        row_w.deleteLater()
+
     def _pick_color(self, color: str | None, clicked_btn: QPushButton):
         """색상 버튼 선택 처리 (단일 선택 라디오 동작)"""
         self._selected_color = color
@@ -2681,15 +2874,34 @@ class TaskDialog(_MovableDialog):
             self.chk_due.setChecked(True)
             parts = d["due_date"].split("-")
             self.de_due.setDate(QDate(int(parts[0]), int(parts[1]), int(parts[2])))
-        # 파일 경로 복원
+        # 파일 경로 복원 (legacy)
         if self.ed_fpath and d["file_path"]:
             self.ed_fpath.setText(d["file_path"])
+        # 첨부 파일 목록 복원
+        if self._db and self._is_edit and self._file_list_lay is not None:
+            self._existing_files = self._db.get_task_files(d["id"])
+            for f in self._existing_files:
+                self._add_file_row(f["original_path"], is_existing=True, file_id=f["id"])
+            # 레거시 file_path 처리
+            if d["file_path"] and not self._existing_files:
+                self._add_file_row(d["file_path"], is_existing=False, file_id=None)
         # 색상 복원
         if hasattr(self, "_color_btns"):
             saved_color = d["color"] if d["color"] else None
             self._selected_color = saved_color
             for btn, clr in zip(self._color_btns, TASK_COLORS):
                 btn.setChecked(clr == saved_color)
+        # 연결 과제 복원
+        if self.cb_linked is not None:
+            try:
+                linked_id = d["linked_todo_id"]
+            except (KeyError, IndexError):
+                linked_id = None
+            if linked_id:
+                for i in range(self.cb_linked.count()):
+                    if self.cb_linked.itemData(i) == linked_id:
+                        self.cb_linked.setCurrentIndex(i)
+                        break
 
     def _ok(self):
         if not self.ed_title.text().strip():
@@ -2699,14 +2911,15 @@ class TaskDialog(_MovableDialog):
 
     def values(self) -> dict:
         return {
-            "title":       self.ed_title.text().strip(),
-            "description": self.ed_desc.toPlainText().strip(),
-            "goal":        self.ed_goal.text().strip(),
-            "priority":    self.cb_prio.currentData(),
-            "due_date":    self.de_due.date().toString("yyyy-MM-dd")
-                           if self.chk_due.isChecked() else None,
-            "color":       self._selected_color,
-            "file_path":   self.ed_fpath.text().strip() if self.ed_fpath else None,
+            "title":          self.ed_title.text().strip(),
+            "description":    self.ed_desc.toPlainText().strip(),
+            "goal":           self.ed_goal.text().strip(),
+            "priority":       self.cb_prio.currentData(),
+            "due_date":       self.de_due.date().toString("yyyy-MM-dd")
+                              if self.chk_due.isChecked() else None,
+            "color":          self._selected_color,
+            "file_path":      self.ed_fpath.text().strip() if self.ed_fpath else None,
+            "linked_todo_id": self.cb_linked.currentData() if self.cb_linked else None,
         }
 
 
@@ -3032,14 +3245,18 @@ class LogDialog(_MovableDialog):
 
 class TaskSection(QWidget):
     completion_changed = Signal()   # 완료/미완료 변경 시 CompletedSection 갱신용
+    navigate_to        = Signal(int)  # 긴급업무→과제 스크롤 요청
 
     def __init__(self, db: Database, task_type: str, title: str,
                  header_color: str = "#89b4fa", parent=None):
         super().__init__(parent)
         self.db, self.task_type, self.title_str = db, task_type, title
-        self._header_color = header_color
-        self._collapsed = False
+        self._header_color  = header_color
+        self._collapsed     = False
         self._highlight_date: date | None = None
+        self._sort_mode     = "default"
+        self._batch_mode    = False
+        self._batch_selected: set[int] = set()
         self.setObjectName("SectionWidget")
         self._build()
         self.refresh()
@@ -3064,8 +3281,25 @@ class TaskSection(QWidget):
         tl = QLabel(self.title_str); tl.setObjectName("SectionTitle")
         tl.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
         title_row.addWidget(tl); title_row.addStretch()
+        self.cb_sort = QComboBox()
+        self.cb_sort.setFixedHeight(24)
+        self.cb_sort.setFixedWidth(90)
+        self.cb_sort.setObjectName("SortCombo")
+        self.cb_sort.addItem("기본", "default")
+        self.cb_sort.addItem("마감일↑", "due_asc")
+        self.cb_sort.addItem("마감일↓", "due_desc")
+        self.cb_sort.addItem("우선순위", "priority")
+        self.cb_sort.addItem("생성일↑", "created_asc")
+        self.cb_sort.addItem("생성일↓", "created_desc")
+        self.cb_sort.addItem("제목", "title")
+        self.cb_sort.currentIndexChanged.connect(self._on_sort_changed)
+        title_row.addWidget(self.cb_sort)
         self.lbl_stats = QLabel("0/0 완료"); self.lbl_stats.setObjectName("SectionStats")
         title_row.addWidget(self.lbl_stats)
+        self.btn_batch = QPushButton("☐"); self.btn_batch.setObjectName("SectionCollapseBtn")
+        self.btn_batch.setFixedSize(26, 26); self.btn_batch.setToolTip("선택 모드")
+        self.btn_batch.clicked.connect(self._toggle_batch_mode)
+        title_row.addWidget(self.btn_batch)
         self.btn_col = QPushButton("▼"); self.btn_col.setObjectName("SectionCollapseBtn")
         self.btn_col.setFixedSize(26,26); self.btn_col.clicked.connect(self._toggle)
         title_row.addWidget(self.btn_col)
@@ -3087,6 +3321,31 @@ class TaskSection(QWidget):
 
         b_lay = QVBoxLayout(self.body)
         b_lay.setContentsMargins(8,6,8,8); b_lay.setSpacing(4)
+        # 배치 작업 바 (기본 숨김)
+        self.batch_bar = QWidget()
+        self.batch_bar.setVisible(False)
+        bb_lay = QHBoxLayout(self.batch_bar)
+        bb_lay.setContentsMargins(8, 4, 8, 4); bb_lay.setSpacing(6)
+        self.lbl_batch_count = QLabel("0개 선택")
+        self.lbl_batch_count.setObjectName("FormLabel")
+        bb_lay.addWidget(self.lbl_batch_count)
+        bb_lay.addStretch()
+        btn_ba_all = QPushButton("전체 선택")
+        btn_ba_all.setObjectName("SecondaryBtn")
+        btn_ba_all.setFixedHeight(28)
+        btn_ba_all.clicked.connect(self._batch_select_all)
+        bb_lay.addWidget(btn_ba_all)
+        btn_ba_done = QPushButton("✅ 완료")
+        btn_ba_done.setObjectName("PrimaryBtn")
+        btn_ba_done.setFixedHeight(28)
+        btn_ba_done.clicked.connect(self._batch_complete)
+        bb_lay.addWidget(btn_ba_done)
+        btn_ba_del = QPushButton("🗑 삭제")
+        btn_ba_del.setObjectName("TaskDeleteBtn")
+        btn_ba_del.setFixedHeight(28)
+        btn_ba_del.clicked.connect(self._batch_delete)
+        bb_lay.addWidget(btn_ba_del)
+        b_lay.addWidget(self.batch_bar)
         self.items_lay = QVBoxLayout()
         self.items_lay.setContentsMargins(0,0,0,0); self.items_lay.setSpacing(4)
         b_lay.addLayout(self.items_lay)
@@ -3260,6 +3519,30 @@ class TaskSection(QWidget):
                 self._indicator.setGeometry(8, y, self.body.width() - 16, 2)
         self._indicator.show()
         self._indicator.raise_()
+
+    def set_filter(self, query: str) -> int:
+        """검색어로 태스크 필터링. 표시된 항목 수 반환."""
+        shown = 0
+        for i in range(self.items_lay.count()):
+            item = self.items_lay.itemAt(i)
+            if item and item.widget():
+                w = item.widget()
+                if query:
+                    task = self.db.get_task(w._id)
+                    if task:
+                        match = any(
+                            query in (task[f] or "").lower()
+                            for f in ("title", "description", "goal")
+                        )
+                        w.setVisible(match)
+                        if match:
+                            shown += 1
+                    else:
+                        w.setVisible(False)
+                else:
+                    w.setVisible(True)
+                    shown += 1
+        return shown
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5032,6 +5315,8 @@ class MainWindow(QWidget):
         QTimer.singleShot(300, self.update_panel.do_update)
         # 시작 1분 후 첫 마감일 알림 체크
         QTimer.singleShot(60_000, self._check_deadlines)
+        # 시작 3초 후 첨부 파일 경로 누락 체크
+        QTimer.singleShot(3_000, self._check_missing_files)
 
     def _compute_window_size(self) -> tuple[int, int]:
         """현재 배치될 스크린 해상도에 비례해 창 크기 계산 (기준 비율 유지)"""
@@ -5080,6 +5365,11 @@ class MainWindow(QWidget):
         sep = QFrame(); sep.setObjectName("Separator")
         sep.setFrameShape(QFrame.Shape.HLine); sep.setMaximumHeight(1)
         lay.addWidget(sep)
+
+        # 검색 바 (Ctrl+F, 기본 숨김)
+        self._search_bar = self._make_search_bar()
+        self._search_bar.setVisible(False)
+        lay.addWidget(self._search_bar)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -5134,6 +5424,8 @@ class MainWindow(QWidget):
         self.calendar.date_selected.connect(self._on_date_selected)
         self.calendar.add_schedule_requested.connect(self.sec_schedule.add_for_date)
         self.calendar.add_personal_task_requested.connect(self.sec_personal.add_for_date)
+        # 긴급업무 연결 과제 네비게이션
+        self.sec_urgent.navigate_to.connect(self._scroll_to_task)
         # 모니터 구성 변경 감지
         from PySide6.QtGui import QGuiApplication
         QGuiApplication.instance().screenAdded.connect(lambda _: self._on_screen_changed())
@@ -5144,6 +5436,101 @@ class MainWindow(QWidget):
                   lambda: self.tb.btn_pin.setChecked(not self.tb.btn_pin.isChecked()))
         QShortcut(QKeySequence("Ctrl+M"), self, self._on_collapse)
         QShortcut(QKeySequence("Ctrl+,"), self, self._open_options)
+        QShortcut(QKeySequence("Ctrl+F"), self, self._toggle_search)
+
+    # ── 검색 ─────────────────────────────────────────────────────────────────
+    def _make_search_bar(self) -> QWidget:
+        w = QWidget()
+        w.setObjectName("SearchBar")
+        w.setStyleSheet(
+            "QWidget#SearchBar{background:#181825;border-bottom:1px solid #313244;}"
+        )
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(10, 6, 10, 6); lay.setSpacing(8)
+
+        icon_lbl = QLabel("🔍")
+        icon_lbl.setStyleSheet("background:transparent;font-size:14px;")
+        lay.addWidget(icon_lbl)
+
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("제목, 내용, 목표로 검색... (Esc: 닫기)")
+        self._search_edit.setObjectName("SearchEdit")
+        self._search_edit.textChanged.connect(self._on_search)
+        lay.addWidget(self._search_edit, 1)
+
+        self._search_count = QLabel("")
+        self._search_count.setStyleSheet(
+            "color:#6c7086;font-size:11px;background:transparent;"
+        )
+        lay.addWidget(self._search_count)
+
+        btn_close = QPushButton("✕")
+        btn_close.setObjectName("TaskDeleteBtn")
+        btn_close.setFixedSize(24, 24)
+        btn_close.clicked.connect(self._close_search)
+        lay.addWidget(btn_close)
+
+        esc = QShortcut(QKeySequence("Escape"), self._search_edit)
+        esc.setContext(Qt.ShortcutContext.WidgetShortcut)
+        esc.activated.connect(self._close_search)
+
+        return w
+
+    def _toggle_search(self):
+        visible = not self._search_bar.isVisible()
+        self._search_bar.setVisible(visible)
+        if visible:
+            self._search_edit.setFocus()
+            self._search_edit.selectAll()
+        else:
+            self._close_search()
+
+    def _close_search(self):
+        self._search_bar.setVisible(False)
+        self._search_edit.clear()
+        self._on_search("")
+
+    def _on_search(self, query: str):
+        q = query.strip().lower()
+        total = 0
+        for sec in (self.sec_todo, self.sec_urgent, self.sec_personal):
+            total += sec.set_filter(q)
+        self._search_count.setText(f"{total}개 결과" if q else "")
+
+    def _scroll_to_task(self, task_id: int):
+        """긴급업무 연결 과제로 스크롤 + 하이라이트"""
+        if self.sec_todo._collapsed:
+            self.sec_todo._toggle()
+        for i in range(self.sec_todo.items_lay.count()):
+            item = self.sec_todo.items_lay.itemAt(i)
+            if item and item.widget():
+                w = item.widget()
+                if getattr(w, '_id', None) == task_id:
+                    self.scroll.ensureWidgetVisible(w, 20, 20)
+                    orig = w.styleSheet()
+                    w.setStyleSheet(
+                        orig + "QFrame#TaskItem{border:2px solid #f38ba8;border-radius:8px;}"
+                    )
+                    QTimer.singleShot(1800, lambda ww=w, os=orig: ww.setStyleSheet(os))
+                    return
+
+    def _check_missing_files(self):
+        """첨부 파일 원본 경로 누락 여부 확인 후 트레이 알림"""
+        try:
+            missing = self.db.get_missing_file_tasks()
+        except Exception:
+            return
+        if missing:
+            count = len(missing)
+            names = ", ".join(m["filename"] for m in missing[:3])
+            if count > 3:
+                names += f" 외 {count - 3}개"
+            self._tray.showMessage(
+                "첨부 파일 경로 변경",
+                f"원본 위치를 찾을 수 없는 파일 {count}개:\n{names}",
+                QSystemTrayIcon.MessageIcon.Warning,
+                4000,
+            )
 
     # ── 시스템 트레이 ────────────────────────────────────────────────────────
     def _setup_tray(self):
