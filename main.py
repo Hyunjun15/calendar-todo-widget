@@ -24,10 +24,11 @@ Update works 폴더의 날짜별 .txt 파일을 읽어
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
-import sys, os, re, calendar, sqlite3, shutil
+import sys, os, re, calendar, sqlite3, shutil, logging
 import urllib.request, urllib.error
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QDialog,
@@ -47,6 +48,8 @@ from PySide6.QtGui import (
     QIcon, QPixmap, QColor, QPainter, QAction,
     QDrag,
 )
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl
 from PySide6.QtCore import QMimeData
 
 
@@ -54,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v2.30"
+APP_VERSION      = "v2.31"
 APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
@@ -81,6 +84,7 @@ UPDATE_WORKS    = BASE_DIR / "Update works"
 ASSETS_DIR      = BASE_DIR / "assets"
 EXPORT_DIR      = BASE_DIR / "Export"
 ATTACHMENTS_DIR = Path.home() / ".productivity_widget" / "attachments"
+BACKUPS_DIR     = Path.home() / ".productivity_widget" / "backups"
 
 # 2) 내부 리소스 (아이콘 등 EXE 안에 박혀있는 파일들 - 나중에 필요 시 사용)
 # INTERNAL_ASSETS = Path(resource_path("assets"))
@@ -434,7 +438,41 @@ QComboBox, QSpinBox, QDateEdit {{ font-size: {fs}pt; }}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. DATABASE
+# 3. LOGGING SETUP
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _setup_logging() -> logging.Logger:
+    """앱 로거 설정 — ~/.productivity_widget/app.log (최대 1MB × 3개)"""
+    log_dir = Path.home() / ".productivity_widget"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "app.log"
+
+    logger = logging.getLogger("CalendarTodo")
+    logger.setLevel(logging.DEBUG)
+
+    if not logger.handlers:
+        fh = RotatingFileHandler(
+            str(log_path),
+            maxBytes=1_048_576,   # 1 MB
+            backupCount=3,
+            encoding="utf-8",
+        )
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logger.addHandler(fh)
+
+    return logger
+
+
+# 전역 로거 (모듈 임포트 시 초기화)
+_log = _setup_logging()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. DATABASE
 # ═══════════════════════════════════════════════════════════════════════════
 
 class Database:
@@ -449,6 +487,7 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
         self._migrate()
+        _log.info("Database opened: %s", self.db_path)
 
     def _create_tables(self):
         self.conn.executescript("""
@@ -1026,6 +1065,7 @@ class Database:
     def close(self):
         if self.conn:
             self.conn.close()
+            _log.info("Database closed.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5497,6 +5537,17 @@ class OptionsDialog(_MovableDialog):
         self.lbl_lnk_status.setWordWrap(True)
         lay.addWidget(self.lbl_lnk_status)
 
+        lay.addSpacing(16)
+        sep_fb = QFrame(); sep_fb.setFrameShape(QFrame.Shape.HLine)
+        sep_fb.setMaximumHeight(1); lay.addWidget(sep_fb)
+        lay.addSpacing(8)
+        lay.addWidget(self._lbl("피드백 / 문의"))
+        btn_feedback = QPushButton("✉  개발자에게 피드백 보내기")
+        btn_feedback.setObjectName("SecondaryBtn")
+        btn_feedback.setFixedHeight(34)
+        btn_feedback.clicked.connect(self._send_feedback)
+        lay.addWidget(btn_feedback)
+
         lay.addStretch()
         self.tabs.addTab(w, "📋  섹션 설정")
 
@@ -5753,6 +5804,24 @@ class OptionsDialog(_MovableDialog):
         except Exception as e:
             self.lbl_lnk_status.setText(f"⚠ 실패: {e}")
             self.lbl_lnk_status.setStyleSheet("color:#f38ba8;")
+
+    def _send_feedback(self):
+        """기본 메일 클라이언트로 피드백 메일 작성 창 열기"""
+        subject = f"[Calendar & ToDo] 피드백 ({APP_VERSION})"
+        body = (
+            "안녕하세요,\n\n"
+            "피드백/건의 내용을 작성해 주세요:\n\n\n"
+            "---\n"
+            f"앱 버전: {APP_VERSION} ({APP_VERSION_DATE})\n"
+            f"OS: {sys.platform}\n"
+        )
+        import urllib.parse
+        mailto = (
+            "mailto:hyunjun.kwak@hd.com"
+            f"?subject={urllib.parse.quote(subject)}"
+            f"&body={urllib.parse.quote(body)}"
+        )
+        QDesktopServices.openUrl(QUrl(mailto))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6146,6 +6215,8 @@ class MainWindow(QWidget):
         QTimer.singleShot(60_000, self._check_deadlines)
         # 시작 3초 후 첨부 파일 경로 누락 체크
         QTimer.singleShot(3_000, self._check_missing_files)
+        # 시작 10초 후 7일 주기 자동 DB 백업 체크
+        QTimer.singleShot(10_000, self._auto_backup_db)
 
     def _compute_window_size(self) -> tuple[int, int]:
         """현재 배치될 스크린 해상도에 비례해 창 크기 계산 (기준 비율 유지)"""
@@ -6361,6 +6432,27 @@ class MainWindow(QWidget):
                 QSystemTrayIcon.MessageIcon.Warning,
                 4000,
             )
+
+    # ── 자동 DB 백업 ─────────────────────────────────────────────────────────
+    def _auto_backup_db(self):
+        """7일 주기 자동 DB 백업 — ~/.productivity_widget/backups/ 에 날짜별 저장"""
+        try:
+            last_str = self.settings.value("last_db_backup", "", type=str)
+            today = date.today()
+
+            if last_str:
+                last_date = datetime.strptime(last_str, "%Y-%m-%d").date()
+                if (today - last_date).days < 7:
+                    return   # 아직 7일 미경과
+
+            BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+            src = self.db.db_path
+            dst = BACKUPS_DIR / f"tasks_{today.strftime('%Y-%m-%d')}.db"
+            shutil.copy2(str(src), str(dst))
+            self.settings.setValue("last_db_backup", today.strftime("%Y-%m-%d"))
+            _log.info("DB auto-backup → %s", dst)
+        except Exception as e:
+            _log.warning("DB auto-backup failed: %s", e)
 
     # ── 시스템 트레이 ────────────────────────────────────────────────────────
     def _setup_tray(self):
@@ -7080,6 +7172,8 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
+    _log.info("App starting — %s (%s)", APP_VERSION, APP_VERSION_DATE)
+
     db  = Database()
     win = MainWindow(db)
 
@@ -7092,6 +7186,7 @@ def main():
     code = app.exec()
     lock.unlock()
     db.close()
+    _log.info("App exited (code=%d)", code)
     sys.exit(code)
 
 
