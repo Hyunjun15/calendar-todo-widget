@@ -54,7 +54,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v2.29"
+APP_VERSION      = "v2.30"
 APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
@@ -4839,6 +4839,12 @@ class UpdatePanel(QWidget):
         self.btn_refresh.clicked.connect(self.do_update)
         lay.addWidget(self.btn_refresh)
 
+        self.btn_ver = QPushButton("⬆ 업데이트 확인")
+        self.btn_ver.setObjectName("RefreshBtn")
+        self.btn_ver.setFixedHeight(26)
+        self.btn_ver.clicked.connect(self._check_github_version)
+        lay.addWidget(self.btn_ver)
+
     def _watch_dir(self):
         UPDATE_WORKS.mkdir(exist_ok=True)
         self._watcher.addPath(str(UPDATE_WORKS))
@@ -4927,6 +4933,47 @@ class UpdatePanel(QWidget):
     def latest_filename(self) -> str:
         f = WorksFileParser.latest_file(UPDATE_WORKS)
         return f.name if f else "없음"
+
+    def _check_github_version(self):
+        """GitHub Releases API로 최신 버전 확인"""
+        self.btn_ver.setEnabled(False)
+        self.btn_ver.setText("확인 중...")
+        try:
+            import json as _json
+            url = "https://api.github.com/repos/Hyunjun15/calendar-todo-widget/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "CalendarTodoWidget"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = _json.loads(resp.read().decode())
+            latest_tag = data.get("tag_name", "")
+            release_url = data.get("html_url", "")
+            if latest_tag and latest_tag != APP_VERSION:
+                msg = (
+                    f"새 버전이 있습니다!\n\n"
+                    f"현재: {APP_VERSION}  →  최신: {latest_tag}\n\n"
+                    f"GitHub에서 다운로드하시겠습니까?\n{release_url}"
+                )
+                r = QMessageBox.information(
+                    self, "업데이트 가능", msg,
+                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Open,
+                )
+                if r == QMessageBox.StandardButton.Open and release_url:
+                    import subprocess
+                    subprocess.Popen(["start", "", release_url], shell=True)
+            else:
+                QMessageBox.information(
+                    self, "최신 버전", f"현재 최신 버전입니다 ({APP_VERSION}).",
+                    QMessageBox.StandardButton.Ok,
+                )
+        except Exception as e:
+            QMessageBox.warning(
+                self, "연결 실패",
+                f"GitHub 연결에 실패했습니다.\n{type(e).__name__}: {e}",
+                QMessageBox.StandardButton.Ok,
+            )
+        finally:
+            self.btn_ver.setEnabled(True)
+            self.btn_ver.setText("⬆ 업데이트 확인")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5357,6 +5404,29 @@ class OptionsDialog(_MovableDialog):
         w_row.addStretch()
         lay.addLayout(w_row)
 
+        # ── 배치 모니터 ────────────────────────────────────────
+        lay.addWidget(self._lbl("배치 모니터"))
+        from PySide6.QtGui import QGuiApplication
+        self.combo_monitor = QComboBox()
+        self.combo_monitor.addItem("오른쪽 모니터 (기본)", "right")
+        self.combo_monitor.addItem("왼쪽 / 단일 모니터", "left")
+        self.combo_monitor.addItem("기본(Primary) 모니터", "primary")
+        screens = QGuiApplication.screens()
+        for idx, s in enumerate(screens):
+            geo = s.geometry()
+            self.combo_monitor.addItem(
+                f"모니터 {idx+1} ({geo.width()}×{geo.height()})", f"index:{idx}"
+            )
+        cur_mon = self.settings.value("monitor_placement", "right")
+        for i in range(self.combo_monitor.count()):
+            if self.combo_monitor.itemData(i) == cur_mon:
+                self.combo_monitor.setCurrentIndex(i); break
+        self.combo_monitor.currentIndexChanged.connect(
+            lambda: self.settings.setValue("monitor_placement",
+                                           self.combo_monitor.currentData())
+        )
+        lay.addWidget(self.combo_monitor)
+
         # ── UI 테마 ────────────────────────────────────────────
         lay.addWidget(self._lbl("UI 색상 테마"))
         self._theme_btns: dict[str, QPushButton] = {}
@@ -5411,6 +5481,22 @@ class OptionsDialog(_MovableDialog):
 
         lay.addSpacing(8)
         lay.addWidget(self._lbl("※ 달력 숨김 시 달력 하이라이트 기능이 비활성화됩니다."))
+
+        lay.addSpacing(16)
+        sep_lnk = QFrame(); sep_lnk.setFrameShape(QFrame.Shape.HLine)
+        sep_lnk.setMaximumHeight(1); lay.addWidget(sep_lnk)
+        lay.addSpacing(8)
+        lay.addWidget(self._lbl("바탕화면 바로가기"))
+        btn_lnk = QPushButton("🖥  바탕화면에 바로가기 만들기")
+        btn_lnk.setObjectName("SecondaryBtn")
+        btn_lnk.setFixedHeight(34)
+        btn_lnk.clicked.connect(self._create_desktop_shortcut)
+        lay.addWidget(btn_lnk)
+        self.lbl_lnk_status = QLabel("")
+        self.lbl_lnk_status.setObjectName("FormLabel")
+        self.lbl_lnk_status.setWordWrap(True)
+        lay.addWidget(self.lbl_lnk_status)
+
         lay.addStretch()
         self.tabs.addTab(w, "📋  섹션 설정")
 
@@ -5635,6 +5721,329 @@ class OptionsDialog(_MovableDialog):
         else:
             self.lbl_ical_status.setText("⚠ 메인 윈도우를 찾을 수 없음")
 
+    def _create_desktop_shortcut(self):
+        """PowerShell로 바탕화면에 .lnk 바로가기 생성"""
+        import subprocess, shlex
+        desktop = Path.home() / "Desktop"
+        lnk_path = desktop / "Calendar and Todo.lnk"
+        # 현재 실행 환경 감지
+        if getattr(sys, "frozen", False):
+            target = sys.executable
+            args_str = ""
+        else:
+            target = sys.executable
+            script  = str(Path(__file__).resolve())
+            args_str = f'"{script}"'
+        work_dir = str(Path(target).parent)
+        ps = (
+            "$ws = New-Object -ComObject WScript.Shell; "
+            f"$s = $ws.CreateShortcut('{lnk_path}'); "
+            f"$s.TargetPath = '{target}'; "
+            f"$s.Arguments = '{args_str}'; "
+            f"$s.WorkingDirectory = '{work_dir}'; "
+            "$s.Save()"
+        )
+        try:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps],
+                capture_output=True, timeout=10, check=True,
+            )
+            self.lbl_lnk_status.setText(f"✅ 생성됨: {lnk_path}")
+            self.lbl_lnk_status.setStyleSheet("color:#a6e3a1;")
+        except Exception as e:
+            self.lbl_lnk_status.setText(f"⚠ 실패: {e}")
+            self.lbl_lnk_status.setStyleSheet("color:#f38ba8;")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 14-B. JSON 백업 / 복원 다이얼로그
+# ═══════════════════════════════════════════════════════════════════════════
+
+class JsonBackupDialog(_MovableDialog):
+    """데이터 백업(JSON 내보내기) + 복원(선택적 가져오기)"""
+
+    def __init__(self, db: Database, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        self.resize(560, 600)
+        self._import_tasks: list[dict] = []   # 가져오기 후 파싱된 태스크 목록
+        self._import_chks: list[QCheckBox] = []
+        self._build()
+        QShortcut(QKeySequence("Escape"), self, self.accept)
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(14)
+
+        title = QLabel("💾  데이터 백업 / 복원")
+        title.setObjectName("DialogTitle")
+        title.setFont(QFont("맑은 고딕", 14, QFont.Weight.Bold))
+        lay.addWidget(title)
+
+        self.tabs = QTabWidget()
+        lay.addWidget(self.tabs)
+
+        self._build_export_tab()
+        self._build_import_tab()
+
+        br = QHBoxLayout(); br.addStretch()
+        bc = QPushButton("닫기"); bc.setObjectName("SecondaryBtn")
+        bc.setFixedHeight(36); bc.clicked.connect(self.accept)
+        br.addWidget(bc)
+        lay.addLayout(br)
+
+    def _build_export_tab(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(16, 16, 16, 8)
+        lay.setSpacing(12)
+
+        info = QLabel(
+            "모든 태스크, 로그, 진행 그룹, 일정 데이터를\n"
+            "JSON 파일로 내보냅니다."
+        )
+        info.setObjectName("TaskInfoDesc")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        # 내보낼 항목 선택
+        self.chk_exp_tasks = QCheckBox("태스크 + 로그 + 진행 그룹")
+        self.chk_exp_tasks.setObjectName("TaskCheck")
+        self.chk_exp_tasks.setChecked(True)
+        lay.addWidget(self.chk_exp_tasks)
+
+        self.chk_exp_sched = QCheckBox("개인 일정 (schedules)")
+        self.chk_exp_sched.setObjectName("TaskCheck")
+        self.chk_exp_sched.setChecked(True)
+        lay.addWidget(self.chk_exp_sched)
+
+        lay.addStretch()
+
+        self.lbl_exp_status = QLabel("")
+        self.lbl_exp_status.setObjectName("FormLabel")
+        self.lbl_exp_status.setWordWrap(True)
+        lay.addWidget(self.lbl_exp_status)
+
+        btn_exp = QPushButton("📤  JSON 파일로 내보내기")
+        btn_exp.setObjectName("PrimaryBtn")
+        btn_exp.setFixedHeight(38)
+        btn_exp.clicked.connect(self._do_export)
+        lay.addWidget(btn_exp)
+
+        self.tabs.addTab(w, "📤  내보내기")
+
+    def _build_import_tab(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(16, 16, 16, 8)
+        lay.setSpacing(10)
+
+        info = QLabel(
+            "JSON 백업 파일을 불러온 뒤 가져올 항목을 선택하세요.\n"
+            "이미 존재하는 제목의 태스크는 건너뜁니다."
+        )
+        info.setObjectName("TaskInfoDesc")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        btn_load = QPushButton("📂  파일 선택")
+        btn_load.setObjectName("SecondaryBtn")
+        btn_load.setFixedHeight(34)
+        btn_load.clicked.connect(self._load_import_file)
+        lay.addWidget(btn_load)
+
+        # 항목 목록
+        self.scroll_imp = QScrollArea()
+        self.scroll_imp.setWidgetResizable(True)
+        self.scroll_imp.setMinimumHeight(200)
+        self._imp_cont = QWidget()
+        self._imp_lay  = QVBoxLayout(self._imp_cont)
+        self._imp_lay.setContentsMargins(4, 4, 4, 4)
+        self._imp_lay.setSpacing(4)
+        self._imp_lay.addStretch()
+        self.scroll_imp.setWidget(self._imp_cont)
+        lay.addWidget(self.scroll_imp, 1)
+
+        imp_btns = QHBoxLayout()
+        btn_all = QPushButton("전체 선택")
+        btn_all.setObjectName("SecondaryBtn")
+        btn_all.setFixedHeight(28)
+        btn_all.clicked.connect(lambda: [c.setChecked(True) for c in self._import_chks])
+        imp_btns.addWidget(btn_all)
+        btn_none = QPushButton("전체 해제")
+        btn_none.setObjectName("SecondaryBtn")
+        btn_none.setFixedHeight(28)
+        btn_none.clicked.connect(lambda: [c.setChecked(False) for c in self._import_chks])
+        imp_btns.addWidget(btn_none)
+        imp_btns.addStretch()
+        lay.addLayout(imp_btns)
+
+        self.lbl_imp_status = QLabel("")
+        self.lbl_imp_status.setObjectName("FormLabel")
+        self.lbl_imp_status.setWordWrap(True)
+        lay.addWidget(self.lbl_imp_status)
+
+        self.btn_do_import = QPushButton("📥  선택한 항목 가져오기")
+        self.btn_do_import.setObjectName("PrimaryBtn")
+        self.btn_do_import.setFixedHeight(38)
+        self.btn_do_import.setEnabled(False)
+        self.btn_do_import.clicked.connect(self._do_import)
+        lay.addWidget(self.btn_do_import)
+
+        self.tabs.addTab(w, "📥  가져오기")
+
+    # ── 내보내기 ──────────────────────────────────────────────────────────
+    def _do_export(self):
+        import json as _json
+        path, _ = QFileDialog.getSaveFileName(
+            self, "백업 파일 저장", str(Path.home() / "calendar_backup.json"),
+            "JSON 파일 (*.json)"
+        )
+        if not path:
+            return
+        data: dict = {
+            "version": APP_VERSION,
+            "exported_at": datetime.now().isoformat(),
+        }
+        if self.chk_exp_tasks.isChecked():
+            data["tasks"] = self._collect_tasks()
+        if self.chk_exp_sched.isChecked():
+            data["schedules"] = self._collect_schedules()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+            task_cnt = len(data.get("tasks", []))
+            sched_cnt = len(data.get("schedules", []))
+            self.lbl_exp_status.setText(
+                f"✅ 저장 완료: 태스크 {task_cnt}개, 일정 {sched_cnt}개\n{path}"
+            )
+            self.lbl_exp_status.setStyleSheet("color:#a6e3a1;")
+        except Exception as e:
+            self.lbl_exp_status.setText(f"⚠ 저장 실패: {e}")
+            self.lbl_exp_status.setStyleSheet("color:#f38ba8;")
+
+    def _collect_tasks(self) -> list:
+        tasks = []
+        for t in self.db.get_tasks():
+            td = dict(t)
+            # 로그 (일반)
+            td["logs"] = [dict(l) for l in self.db.get_general_logs(t["id"])]
+            # 진행 그룹
+            td["progress_groups"] = []
+            for g in self.db.get_progress_groups(t["id"]):
+                gd = dict(g)
+                gd["entries"] = [dict(e) for e in self.db.get_progress_logs(g["id"])]
+                td["progress_groups"].append(gd)
+            tasks.append(td)
+        # 완료된 태스크도 포함
+        for t in self.db.get_tasks(completed=True):
+            td = dict(t)
+            td["logs"] = [dict(l) for l in self.db.get_general_logs(t["id"])]
+            td["progress_groups"] = []
+            tasks.append(td)
+        return tasks
+
+    def _collect_schedules(self) -> list:
+        return [dict(s) for s in self.db.get_schedules()]
+
+    # ── 가져오기 ──────────────────────────────────────────────────────────
+    def _load_import_file(self):
+        import json as _json
+        path, _ = QFileDialog.getOpenFileName(
+            self, "백업 파일 선택", str(Path.home()), "JSON 파일 (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+        except Exception as e:
+            self.lbl_imp_status.setText(f"⚠ 파일 오류: {e}")
+            self.lbl_imp_status.setStyleSheet("color:#f38ba8;")
+            return
+        self._import_tasks = data.get("tasks", [])
+        self._import_sched = data.get("schedules", [])
+        # 목록 렌더링
+        while self._imp_lay.count() > 1:
+            item = self._imp_lay.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        self._import_chks = []
+        type_labels = {
+            "todo": "📝 과제", "urgent": "🚨 긴급",
+            "misc": "📌 기타", "personal": "👤 개인",
+        }
+        for t in self._import_tasks:
+            lbl = type_labels.get(t.get("task_type", ""), "?")
+            chk = QCheckBox(f"[{lbl}]  {t.get('title','?')}")
+            chk.setObjectName("TaskCheck")
+            chk.setChecked(True)
+            self._imp_lay.insertWidget(self._imp_lay.count() - 1, chk)
+            self._import_chks.append(chk)
+        if self._import_sched:
+            sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine); sep.setMaximumHeight(1)
+            self._imp_lay.insertWidget(self._imp_lay.count() - 1, sep)
+            self.chk_imp_sched = QCheckBox(f"일정 {len(self._import_sched)}개 전체")
+            self.chk_imp_sched.setObjectName("TaskCheck")
+            self.chk_imp_sched.setChecked(True)
+            self._imp_lay.insertWidget(self._imp_lay.count() - 1, self.chk_imp_sched)
+        else:
+            self.chk_imp_sched = None
+        src_ver = data.get("version", "?")
+        src_date = data.get("exported_at", "?")[:16]
+        self.lbl_imp_status.setText(
+            f"파일: {Path(path).name}  ({src_ver}, {src_date})\n"
+            f"태스크 {len(self._import_tasks)}개, 일정 {len(self._import_sched)}개"
+        )
+        self.lbl_imp_status.setStyleSheet("color:#a6adc8;")
+        self.btn_do_import.setEnabled(bool(self._import_tasks or self._import_sched))
+
+    def _do_import(self):
+        added_t = added_s = 0
+        for chk, task in zip(self._import_chks, self._import_tasks):
+            if not chk.isChecked():
+                continue
+            try:
+                new_id = self.db.add_task(
+                    task.get("title",""),
+                    task.get("description",""),
+                    task.get("goal",""),
+                    task.get("task_type", "todo"),
+                    task.get("priority", 2),
+                    task.get("due_date"),
+                    source=SOURCE_MANUAL,
+                    color=task.get("color"),
+                )
+                # 로그 복원
+                for lg in task.get("logs", []):
+                    self.db.add_log(new_id, lg.get("content",""), lg.get("file_path"))
+                # 진행 그룹 복원
+                for g in task.get("progress_groups", []):
+                    grp_id = self.db.add_progress_group(new_id, g.get("title","복원된 그룹"))
+                    for e in g.get("entries", []):
+                        self.db.add_progress_log(new_id, grp_id, e.get("content",""))
+                added_t += 1
+            except Exception:
+                pass
+        if self.chk_imp_sched and self.chk_imp_sched.isChecked():
+            for s in self._import_sched:
+                try:
+                    self.db.add_schedule(
+                        s.get("name",""), s.get("event_date",""),
+                        s.get("end_date"), s.get("start_time"),
+                        s.get("location",""), s.get("content",""),
+                        s.get("event_type","schedule"),
+                    )
+                    added_s += 1
+                except Exception:
+                    pass
+        self.lbl_imp_status.setText(f"✅ 완료: 태스크 {added_t}개, 일정 {added_s}개 가져옴")
+        self.lbl_imp_status.setStyleSheet("color:#a6e3a1;")
+        self.btn_do_import.setEnabled(False)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 15. TITLE BAR
@@ -5664,6 +6073,11 @@ class TitleBar(QWidget):
         ver_lbl.setToolTip(f"업데이트: {APP_VERSION_DATE}")
         lay.addWidget(ver_lbl)
         lay.addStretch()
+
+        self.btn_backup = QPushButton("💾")
+        self.btn_backup.setObjectName("TitleBtn")
+        self.btn_backup.setFixedSize(34, 34); self.btn_backup.setToolTip("데이터 백업 / 복원 (JSON)")
+        lay.addWidget(self.btn_backup)
 
         self.btn_export = QPushButton("📤")
         self.btn_export.setObjectName("TitleBtn")
@@ -5830,6 +6244,7 @@ class MainWindow(QWidget):
         self.tb.btn_close.clicked.connect(self._on_close_btn)
         self.tb.btn_col.clicked.connect(self._on_collapse)
         self.tb.btn_pin.toggled.connect(self._on_pin)
+        self.tb.btn_backup.clicked.connect(self._open_backup)
         self.tb.btn_export.clicked.connect(self._open_export)
         self.tb.btn_options.clicked.connect(self._open_options)
         self.update_panel.update_done.connect(self._refresh_all)
@@ -6180,11 +6595,12 @@ class MainWindow(QWidget):
         self._deadline_timer.start()
 
     def _check_deadlines(self):
-        """오늘/내일 마감 + 초과 태스크 트레이 알림"""
-        today    = date.today()
-        tomorrow = today + timedelta(days=1)
+        """D-3 / D-1 / D-day / 마감 초과 트레이 알림"""
+        today  = date.today()
+        d1     = today + timedelta(days=1)
+        d3     = today + timedelta(days=3)
 
-        overdue, due_today, due_tomorrow = [], [], []
+        overdue, due_today, due_d1, due_d3 = [], [], [], []
 
         for t in self.db.get_tasks():
             if t["is_completed"] or not t["due_date"]:
@@ -6197,32 +6613,37 @@ class MainWindow(QWidget):
                 overdue.append(t["title"])
             elif d == today:
                 due_today.append(t["title"])
-            elif d == tomorrow:
-                due_tomorrow.append(t["title"])
+            elif d == d1:
+                due_d1.append(t["title"])
+            elif d == d3:
+                due_d3.append(t["title"])
 
-        # 하루 1회만 알림 (같은 날짜 중복 방지)
+        # 하루 1회만 알림 (마감 초과 제외)
         last_notif = self.settings.value("last_notif_date", "")
         today_str  = today.isoformat()
         if last_notif == today_str and not overdue:
             return
 
+        def _fmt(lst, n=2):
+            s = ", ".join(lst[:n])
+            return s + ("..." if len(lst) > n else "")
+
         lines = []
         if overdue:
-            lines.append(f"🔴 마감 초과 {len(overdue)}건: {', '.join(overdue[:2])}" +
-                         ("..." if len(overdue) > 2 else ""))
+            lines.append(f"🔴 마감 초과 {len(overdue)}건: {_fmt(overdue)}")
         if due_today:
-            lines.append(f"🟡 오늘 마감 {len(due_today)}건: {', '.join(due_today[:2])}" +
-                         ("..." if len(due_today) > 2 else ""))
-        if due_tomorrow:
-            lines.append(f"🟢 내일 마감 {len(due_tomorrow)}건: {', '.join(due_tomorrow[:2])}" +
-                         ("..." if len(due_tomorrow) > 2 else ""))
+            lines.append(f"🟠 D-day {len(due_today)}건: {_fmt(due_today)}")
+        if due_d1:
+            lines.append(f"🟡 D-1 {len(due_d1)}건: {_fmt(due_d1)}")
+        if due_d3:
+            lines.append(f"🟢 D-3 {len(due_d3)}건: {_fmt(due_d3)}")
 
         if lines:
             self._tray.showMessage(
                 "📋 Calendar and To do list — 마감일 알림",
                 "\n".join(lines),
                 QSystemTrayIcon.MessageIcon.Warning,
-                6000
+                7000
             )
             self.settings.setValue("last_notif_date", today_str)
 
@@ -6308,14 +6729,30 @@ class MainWindow(QWidget):
         self.move(pos); self.show()
         self.settings.setValue("pinned", pinned)
 
+    def _pick_monitor(self):
+        """설정의 monitor_placement 값으로 배치할 스크린 선택"""
+        from PySide6.QtGui import QGuiApplication
+        screens = QGuiApplication.screens()
+        placement = self.settings.value("monitor_placement", "right")
+        if placement == "primary":
+            return QGuiApplication.primaryScreen()
+        if placement == "left":
+            return min(screens, key=lambda s: s.geometry().x())
+        if placement.startswith("index:"):
+            try:
+                idx = int(placement.split(":")[1])
+                if 0 <= idx < len(screens):
+                    return screens[idx]
+            except (ValueError, IndexError):
+                pass
+        # default "right": 가장 오른쪽 모니터
+        return max(screens, key=lambda s: s.geometry().x())
+
     def _position(self):
         saved = self.settings.value("window_pos")
         if saved:
             self.move(saved); return
-        from PySide6.QtGui import QGuiApplication
-        screens = QGuiApplication.screens()
-        tgt = max(screens, key=lambda s: s.geometry().x()) if len(screens) >= 2 \
-              else QGuiApplication.primaryScreen()
+        tgt = self._pick_monitor()
         geo = tgt.availableGeometry()
         self.move(geo.right() - self.width(), geo.top())
 
@@ -6379,6 +6816,12 @@ class MainWindow(QWidget):
         notif_on = self.settings.value("notif_enabled", True, type=bool)
         if not notif_on:
             self._deadline_timer.stop()
+
+    # ── 백업/복원 다이얼로그 ────────────────────────────────────────────────
+    def _open_backup(self):
+        dlg = JsonBackupDialog(self.db, self)
+        dlg.exec()
+        self._refresh_all()
 
     # ── 내보내기 다이얼로그 ─────────────────────────────────────────────────
     def _open_export(self):
