@@ -54,8 +54,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v2.28"
-APP_VERSION_DATE = "2026-04-01"
+APP_VERSION      = "v2.29"
+APP_VERSION_DATE = "2026-04-02"
 
 def resource_path(relative_path):
     """
@@ -483,13 +483,23 @@ class Database:
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id    INTEGER NOT NULL,
                 content    TEXT    NOT NULL,
-                created_at TEXT    NOT NULL,
-                file_path  TEXT    DEFAULT NULL,
+                created_at         TEXT    NOT NULL,
+                file_path          TEXT    DEFAULT NULL,
+                log_type           TEXT    DEFAULT 'general',
+                progress_group_id  INTEGER DEFAULT NULL,
                 FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS db_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT
+            );
+            CREATE TABLE IF NOT EXISTS progress_groups (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id          INTEGER NOT NULL,
+                title            TEXT    NOT NULL,
+                created_at       TEXT    NOT NULL,
+                source_urgent_id INTEGER DEFAULT NULL,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS schedules (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -571,6 +581,28 @@ class Database:
             );
         """)
         self.conn.commit()
+
+        # progress_groups 테이블 마이그레이션
+        self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS progress_groups (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id          INTEGER NOT NULL,
+                title            TEXT    NOT NULL,
+                created_at       TEXT    NOT NULL,
+                source_urgent_id INTEGER DEFAULT NULL,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+        """)
+        self.conn.commit()
+
+        # task_logs: log_type / progress_group_id 컬럼 마이그레이션
+        for col, defn in [("log_type",          "TEXT DEFAULT 'general'"),
+                          ("progress_group_id", "INTEGER DEFAULT NULL")]:
+            try:
+                self.conn.execute(f"ALTER TABLE task_logs ADD COLUMN {col} {defn}")
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
         # task_type CHECK 제약이 있는 구형 DB → 재생성
         try:
@@ -812,6 +844,67 @@ class Database:
             if not Path(r["original_path"]).exists():
                 missing.append(dict(r))
         return missing
+
+    # ── 진행 그룹 CRUD ───────────────────────────────────────────────────────
+    def add_progress_group(self, task_id: int, title: str,
+                           source_urgent_id: int | None = None) -> int:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur = self.conn.execute(
+            "INSERT INTO progress_groups (task_id,title,created_at,source_urgent_id) "
+            "VALUES (?,?,?,?)",
+            (task_id, title, now, source_urgent_id)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_progress_groups(self, task_id: int) -> list:
+        return self.conn.execute(
+            "SELECT * FROM progress_groups WHERE task_id=? ORDER BY created_at ASC",
+            (task_id,)
+        ).fetchall()
+
+    def delete_progress_group(self, group_id: int):
+        """그룹 삭제 + 소속 로그 항목 삭제"""
+        self.conn.execute(
+            "DELETE FROM task_logs WHERE progress_group_id=?", (group_id,)
+        )
+        self.conn.execute(
+            "DELETE FROM progress_groups WHERE id=?", (group_id,)
+        )
+        self.conn.commit()
+
+    def get_progress_logs(self, group_id: int) -> list:
+        return self.conn.execute(
+            "SELECT * FROM task_logs WHERE progress_group_id=? ORDER BY created_at ASC",
+            (group_id,)
+        ).fetchall()
+
+    def add_progress_log(self, task_id: int, group_id: int, content: str) -> int:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cur = self.conn.execute(
+            "INSERT INTO task_logs (task_id,content,created_at,log_type,progress_group_id) "
+            "VALUES (?,?,?,'progress',?)",
+            (task_id, content, now, group_id)
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_general_logs(self, task_id: int) -> list:
+        """일반 로그만 반환 (log_type='general' 또는 NULL)"""
+        return self.conn.execute(
+            "SELECT * FROM task_logs WHERE task_id=? "
+            "AND (log_type='general' OR log_type IS NULL) "
+            "AND progress_group_id IS NULL "
+            "ORDER BY created_at ASC",
+            (task_id,)
+        ).fetchall()
+
+    def get_urgent_progress_groups(self, urgent_task_id: int) -> list:
+        """긴급업무 완료 시 생성된 진행 그룹 목록"""
+        return self.conn.execute(
+            "SELECT * FROM progress_groups WHERE source_urgent_id=?",
+            (urgent_task_id,)
+        ).fetchall()
 
     # ── 일정 CRUD ────────────────────────────────────────────────────────────
     def add_schedule(self, name, event_date, end_date=None, start_time=None,
@@ -3077,86 +3170,172 @@ class LogItemWidget(QFrame):
 
 
 class LogDialog(_MovableDialog):
+    """진행 로그 다이얼로그 — 좌측 사이드바 탭 (일반사항 / 과제진행상황)"""
+
     def __init__(self, db: Database, task_id: int, parent=None):
         super().__init__(parent)
         self.db, self.task_id = db, task_id
         self._task = db.get_task(task_id)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.resize(520, 620)
+        self.resize(620, 680)
+        self._cur_tab = "general"   # "general" | "progress"
+        self._log_attach_path = ""
         self._build()
-        self._load()
+        self._switch_tab("general")
         QShortcut(QKeySequence("Escape"), self, self.accept)
-        QShortcut(QKeySequence("Ctrl+Return"), self, self._add)
+        QShortcut(QKeySequence("Ctrl+Return"), self, self._add_general)
 
     def _build(self):
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 18, 20, 18)
-        lay.setSpacing(12)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── 좌측 사이드바 ────────────────────────────────────────────────
+        sidebar = QWidget()
+        sidebar.setFixedWidth(150)
+        sidebar.setObjectName("LogSidebar")
+        sidebar.setStyleSheet(
+            "QWidget#LogSidebar{background:#181825;border-right:1px solid #313244;}"
+        )
+        sb_lay = QVBoxLayout(sidebar)
+        sb_lay.setContentsMargins(0, 0, 0, 0)
+        sb_lay.setSpacing(0)
+
+        # 태스크 제목 (사이드바 헤더)
+        task_hdr = QLabel(self._task["title"])
+        task_hdr.setObjectName("SectionTitle")
+        task_hdr.setWordWrap(True)
+        task_hdr.setStyleSheet(
+            "color:#cdd6f4;font-weight:bold;font-size:11px;"
+            "padding:14px 10px 10px 10px;background:transparent;"
+        )
+        sb_lay.addWidget(task_hdr)
+
+        sep0 = QFrame(); sep0.setFrameShape(QFrame.Shape.HLine)
+        sep0.setMaximumHeight(1)
+        sep0.setStyleSheet("background:#313244;")
+        sb_lay.addWidget(sep0)
+
+        def make_tab_btn(icon, text, key):
+            btn = QPushButton(f"  {icon}  {text}")
+            btn.setCheckable(True)
+            btn.setObjectName("LogTabBtn")
+            btn.setStyleSheet(
+                "QPushButton#LogTabBtn{"
+                "  text-align:left;padding:12px 10px;"
+                "  border:none;border-radius:0;"
+                "  color:#a6adc8;font-size:11px;background:transparent;"
+                "}"
+                "QPushButton#LogTabBtn:checked{"
+                "  color:#cdd6f4;background:#24243e;"
+                "  border-left:3px solid #89b4fa;"
+                "}"
+                "QPushButton#LogTabBtn:hover:!checked{"
+                "  background:#1e1e2e;"
+                "}"
+            )
+            btn.clicked.connect(lambda: self._switch_tab(key))
+            return btn
+
+        self.btn_general  = make_tab_btn("📝", "일반사항", "general")
+        self.btn_progress = make_tab_btn("📊", "과제진행상황", "progress")
+        sb_lay.addWidget(self.btn_general)
+        sb_lay.addWidget(self.btn_progress)
+        sb_lay.addStretch()
+
+        # 닫기 버튼 (사이드바 하단)
+        btn_close = QPushButton("✕  닫기")
+        btn_close.setObjectName("SecondaryBtn")
+        btn_close.setStyleSheet(
+            "QPushButton{border:none;border-radius:0;padding:10px;color:#6c7086;background:transparent;}"
+            "QPushButton:hover{color:#cdd6f4;background:#1e1e2e;}"
+        )
+        btn_close.clicked.connect(self.accept)
+        sb_lay.addWidget(btn_close)
+
+        root.addWidget(sidebar)
+
+        # ── 우측 콘텐츠 영역 ─────────────────────────────────────────────
+        self.content_area = QWidget()
+        content_lay = QVBoxLayout(self.content_area)
+        content_lay.setContentsMargins(0, 0, 0, 0)
+        content_lay.setSpacing(0)
 
         # 태스크 정보 박스
         info = QFrame()
         info.setObjectName("TaskInfoBox")
+        info.setStyleSheet(
+            "QFrame#TaskInfoBox{background:#1e1e2e;border:none;"
+            "border-bottom:1px solid #313244;}"
+        )
         info_l = QVBoxLayout(info)
-        info_l.setContentsMargins(14, 12, 14, 12)
+        info_l.setContentsMargins(16, 12, 16, 12)
         info_l.setSpacing(4)
 
         t_lbl = QLabel(self._task["title"])
         t_lbl.setObjectName("TaskInfoTitle")
-        t_lbl.setFont(QFont("맑은 고딕", 13, QFont.Weight.Bold))
+        t_lbl.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
         t_lbl.setWordWrap(True)
         info_l.addWidget(t_lbl)
 
         goal = self._task["goal"]
         if goal:
-            g_lbl = QLabel(f"▸ 목표: {goal}")
+            g_lbl = QLabel(f"▸ {goal}")
             g_lbl.setObjectName("TaskInfoDesc")
             g_lbl.setWordWrap(True)
             info_l.addWidget(g_lbl)
 
-        desc = self._task["description"]
-        if desc and desc.strip():
-            d_lbl = QLabel(desc)
-            d_lbl.setObjectName("TaskInfoDesc")
-            d_lbl.setWordWrap(True)
-            info_l.addWidget(d_lbl)
-        lay.addWidget(info)
+        content_lay.addWidget(info)
 
-        # 로그 헤더
-        hdr = QHBoxLayout()
-        hdr.addWidget(self._mk_lbl("📋 진행 로그", "DialogTitle",
-                                   QFont("맑은 고딕", 13, QFont.Weight.Bold)))
-        hdr.addStretch()
+        # 탭 콘텐츠 스택 (QWidget swap 방식)
+        self.stack = QWidget()
+        self.stack_lay = QVBoxLayout(self.stack)
+        self.stack_lay.setContentsMargins(0, 0, 0, 0)
+        self.stack_lay.setSpacing(0)
+        content_lay.addWidget(self.stack, 1)
+
+        root.addWidget(self.content_area, 1)
+
+        # ── 일반사항 패널 ─────────────────────────────────────────────────
+        self.panel_general = QWidget()
+        pg_lay = QVBoxLayout(self.panel_general)
+        pg_lay.setContentsMargins(16, 14, 16, 14)
+        pg_lay.setSpacing(10)
+
+        hdr_g = QHBoxLayout()
+        lbl_h = QLabel("📝 일반사항")
+        lbl_h.setObjectName("DialogTitle")
+        lbl_h.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
+        hdr_g.addWidget(lbl_h)
+        hdr_g.addStretch()
         self.lbl_count = QLabel("0개")
         self.lbl_count.setObjectName("FormLabel")
-        hdr.addWidget(self.lbl_count)
-        lay.addLayout(hdr)
+        hdr_g.addWidget(self.lbl_count)
+        pg_lay.addLayout(hdr_g)
 
-        # 로그 스크롤
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_general = QScrollArea()
+        self.scroll_general.setWidgetResizable(True)
+        self.scroll_general.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.log_cont = QWidget()
-        self.log_lay  = QVBoxLayout(self.log_cont)
-        self.log_lay.setContentsMargins(0,0,0,0)
+        self.log_lay = QVBoxLayout(self.log_cont)
+        self.log_lay.setContentsMargins(0, 0, 0, 0)
         self.log_lay.setSpacing(6)
         self.log_lay.addStretch()
-        self.scroll.setWidget(self.log_cont)
-        self.scroll.setMinimumHeight(150)
-        lay.addWidget(self.scroll, 1)
+        self.scroll_general.setWidget(self.log_cont)
+        self.scroll_general.setMinimumHeight(150)
+        pg_lay.addWidget(self.scroll_general, 1)
 
-        # 입력
-        sep = QFrame(); sep.setObjectName("Separator")
-        sep.setFrameShape(QFrame.Shape.HLine); sep.setMaximumHeight(1)
-        lay.addWidget(sep)
-        lay.addWidget(self._mk_lbl("새 로그 작성", "FormLabel"))
+        sep_g = QFrame(); sep_g.setFrameShape(QFrame.Shape.HLine)
+        sep_g.setMaximumHeight(1); sep_g.setObjectName("Separator")
+        pg_lay.addWidget(sep_g)
+
+        pg_lay.addWidget(self._mk_lbl("새 메모 작성 (Ctrl+Enter 저장)", "FormLabel"))
         self.ed = QPlainTextEdit()
-        self.ed.setPlaceholderText("진행 내용 입력... (Ctrl+Enter 저장)")
+        self.ed.setPlaceholderText("내용 입력...")
         self.ed.setMaximumHeight(80)
-        lay.addWidget(self.ed)
+        pg_lay.addWidget(self.ed)
 
-        # 파일 첨부 행
-        self._log_attach_path = ""
         fa = QHBoxLayout(); fa.setSpacing(6)
         self.lbl_attach = QLabel("📎 파일 없음")
         self.lbl_attach.setObjectName("LogTimestamp")
@@ -3171,29 +3350,81 @@ class LogDialog(_MovableDialog):
         btn_detach.setFixedSize(28, 28)
         btn_detach.clicked.connect(self._clear_attach)
         fa.addWidget(btn_detach)
-        lay.addLayout(fa)
+        pg_lay.addLayout(fa)
 
-        br = QHBoxLayout(); br.addStretch()
-        bc = QPushButton("닫기"); bc.setObjectName("SecondaryBtn")
-        bc.setFixedHeight(36); bc.clicked.connect(self.accept); br.addWidget(bc)
-        ba = QPushButton("로그 추가"); ba.setObjectName("PrimaryBtn")
-        ba.setFixedHeight(36); ba.clicked.connect(self._add); br.addWidget(ba)
-        lay.addLayout(br)
-        self.ed.setFocus()
+        br_g = QHBoxLayout(); br_g.addStretch()
+        ba_g = QPushButton("메모 추가")
+        ba_g.setObjectName("PrimaryBtn")
+        ba_g.setFixedHeight(34)
+        ba_g.clicked.connect(self._add_general)
+        br_g.addWidget(ba_g)
+        pg_lay.addLayout(br_g)
+
+        # ── 과제진행상황 패널 ─────────────────────────────────────────────
+        self.panel_progress = QWidget()
+        pp_lay = QVBoxLayout(self.panel_progress)
+        pp_lay.setContentsMargins(16, 14, 16, 14)
+        pp_lay.setSpacing(10)
+
+        hdr_p = QHBoxLayout()
+        lbl_ph = QLabel("📊 과제진행상황")
+        lbl_ph.setObjectName("DialogTitle")
+        lbl_ph.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
+        hdr_p.addWidget(lbl_ph)
+        hdr_p.addStretch()
+        btn_new_grp = QPushButton("＋ 새 그룹")
+        btn_new_grp.setObjectName("PrimaryBtn")
+        btn_new_grp.setFixedHeight(28)
+        btn_new_grp.clicked.connect(self._add_progress_group)
+        hdr_p.addWidget(btn_new_grp)
+        pp_lay.addLayout(hdr_p)
+
+        self.scroll_progress = QScrollArea()
+        self.scroll_progress.setWidgetResizable(True)
+        self.scroll_progress.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.prog_cont = QWidget()
+        self.prog_lay  = QVBoxLayout(self.prog_cont)
+        self.prog_lay.setContentsMargins(0, 0, 0, 0)
+        self.prog_lay.setSpacing(8)
+        self.prog_lay.addStretch()
+        self.scroll_progress.setWidget(self.prog_cont)
+        self.scroll_progress.setMinimumHeight(150)
+        pp_lay.addWidget(self.scroll_progress, 1)
 
     def _mk_lbl(self, text, obj, font=None):
         l = QLabel(text); l.setObjectName(obj)
         if font: l.setFont(font)
         return l
 
-    def _load(self):
+    def _switch_tab(self, key: str):
+        self._cur_tab = key
+        self.btn_general.setChecked(key == "general")
+        self.btn_progress.setChecked(key == "progress")
+
+        # 스택에서 기존 패널 제거
+        while self.stack_lay.count():
+            item = self.stack_lay.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+        if key == "general":
+            self.stack_lay.addWidget(self.panel_general)
+            self.panel_general.setVisible(True)
+            self._load_general()
+            self.ed.setFocus()
+        else:
+            self.stack_lay.addWidget(self.panel_progress)
+            self.panel_progress.setVisible(True)
+            self._load_progress()
+
+    def _load_general(self):
         while self.log_lay.count() > 1:
             item = self.log_lay.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        logs = self.db.get_logs(self.task_id)
+        logs = self.db.get_general_logs(self.task_id)
         self.lbl_count.setText(f"{len(logs)}개")
         if not logs:
-            emp = QLabel("아직 진행 로그가 없습니다.")
+            emp = QLabel("아직 메모가 없습니다.")
             emp.setObjectName("TaskInfoDesc")
             emp.setAlignment(Qt.AlignmentFlag.AlignCenter)
             emp.setStyleSheet("color:#45475a;padding:20px 0;")
@@ -3204,9 +3435,118 @@ class LogDialog(_MovableDialog):
                 card.delete_requested.connect(self._del_log)
                 card.edit_done.connect(self._edit_log)
                 self.log_lay.insertWidget(i, card)
-        self.scroll.verticalScrollBar().setValue(
-            self.scroll.verticalScrollBar().maximum()
+        self.scroll_general.verticalScrollBar().setValue(
+            self.scroll_general.verticalScrollBar().maximum()
         )
+
+    def _load_progress(self):
+        while self.prog_lay.count() > 1:
+            item = self.prog_lay.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        groups = self.db.get_progress_groups(self.task_id)
+        if not groups:
+            emp = QLabel("진행 그룹이 없습니다.\n'＋ 새 그룹' 버튼으로 추가하세요.")
+            emp.setObjectName("TaskInfoDesc")
+            emp.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            emp.setWordWrap(True)
+            emp.setStyleSheet("color:#45475a;padding:20px 0;")
+            self.prog_lay.insertWidget(0, emp)
+        else:
+            for i, grp in enumerate(groups):
+                card = self._make_group_card(grp)
+                self.prog_lay.insertWidget(i, card)
+        self.scroll_progress.verticalScrollBar().setValue(
+            self.scroll_progress.verticalScrollBar().maximum()
+        )
+
+    def _make_group_card(self, grp) -> QFrame:
+        card = QFrame()
+        card.setObjectName("LogItem")
+        card.setStyleSheet(
+            "QFrame#LogItem{background:#24243e;border:1px solid #313244;border-radius:8px;}"
+        )
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(12, 10, 12, 10)
+        cl.setSpacing(6)
+
+        # 헤더 행: 제목 + 날짜 + 삭제
+        hdr = QHBoxLayout()
+        title_lbl = QLabel(f"▶ {grp['title']}")
+        title_lbl.setObjectName("TaskTitle")
+        title_lbl.setStyleSheet("font-weight:bold;font-size:11px;background:transparent;")
+        hdr.addWidget(title_lbl, 1)
+        date_lbl = QLabel(grp["created_at"][:10])
+        date_lbl.setObjectName("LogTimestamp")
+        date_lbl.setStyleSheet("font-size:10px;background:transparent;color:#6c7086;")
+        hdr.addWidget(date_lbl)
+        btn_del_grp = QPushButton("✕")
+        btn_del_grp.setObjectName("LogDeleteBtn")
+        btn_del_grp.setFixedSize(20, 20)
+        gid = grp["id"]
+        btn_del_grp.clicked.connect(lambda _=None, g=gid: self._del_group(g))
+        hdr.addWidget(btn_del_grp)
+        cl.addLayout(hdr)
+
+        # 기존 항목들
+        entries = self.db.get_progress_logs(grp["id"])
+        for entry in entries:
+            entry_lbl = QLabel(f"• {entry['content']}")
+            entry_lbl.setObjectName("LogContent")
+            entry_lbl.setWordWrap(True)
+            entry_lbl.setStyleSheet("background:transparent;padding-left:4px;")
+            entry_lbl.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse |
+                Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
+            cl.addWidget(entry_lbl)
+
+        # 새 항목 추가
+        add_row = QHBoxLayout(); add_row.setSpacing(6)
+        ed_entry = QLineEdit()
+        ed_entry.setPlaceholderText("항목 추가...")
+        ed_entry.setMaximumHeight(28)
+        add_row.addWidget(ed_entry, 1)
+        btn_add_entry = QPushButton("추가")
+        btn_add_entry.setObjectName("PrimaryBtn")
+        btn_add_entry.setFixedHeight(28)
+        btn_add_entry.setFixedWidth(50)
+        btn_add_entry.clicked.connect(
+            lambda _=None, e=ed_entry, g=grp["id"]: self._add_progress_entry(e, g)
+        )
+        ed_entry.returnPressed.connect(
+            lambda e=ed_entry, g=grp["id"]: self._add_progress_entry(e, g)
+        )
+        add_row.addWidget(btn_add_entry)
+        cl.addLayout(add_row)
+
+        return card
+
+    def _add_progress_group(self):
+        from PySide6.QtWidgets import QInputDialog
+        title, ok = QInputDialog.getText(
+            self, "새 진행 그룹", "그룹 제목 (예: 1차 미팅, 현장 방문):"
+        )
+        if ok and title.strip():
+            self.db.add_progress_group(self.task_id, title.strip())
+            self._load_progress()
+
+    def _add_progress_entry(self, ed: QLineEdit, group_id: int):
+        txt = ed.text().strip()
+        if not txt:
+            return
+        self.db.add_progress_log(self.task_id, group_id, txt)
+        ed.clear()
+        self._load_progress()
+
+    def _del_group(self, group_id: int):
+        r = QMessageBox.question(
+            self, "그룹 삭제", "이 진행 그룹과 모든 항목을 삭제하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if r == QMessageBox.StandardButton.Yes:
+            self.db.delete_progress_group(group_id)
+            self._load_progress()
 
     def _browse_attach(self):
         path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "모든 파일 (*.*)")
@@ -3218,25 +3558,27 @@ class LogDialog(_MovableDialog):
         self._log_attach_path = ""
         self.lbl_attach.setText("📎 파일 없음")
 
-    def _add(self):
+    def _add_general(self):
         txt = self.ed.toPlainText().strip()
         if not txt:
             self.ed.setPlaceholderText("⚠ 내용을 입력하세요"); return
         self.db.add_log(self.task_id, txt, self._log_attach_path or None)
         self._log_attach_path = ""
         self.lbl_attach.setText("📎 파일 없음")
-        self.ed.clear(); self._load()
+        self.ed.clear()
+        self._load_general()
 
     def _edit_log(self, log_id: int, new_content: str, file_path: str):
         self.db.update_log(log_id, new_content, file_path or None)
-        self._load()  # 파일 경로 변경도 헤더 버튼에 반영
+        self._load_general()
 
     def _del_log(self, log_id):
-        r = QMessageBox.question(self, "로그 삭제", "이 로그를 삭제하시겠습니까?",
+        r = QMessageBox.question(self, "메모 삭제", "이 메모를 삭제하시겠습니까?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No)
         if r == QMessageBox.StandardButton.Yes:
-            self.db.delete_log(log_id); self._load()
+            self.db.delete_log(log_id)
+            self._load_general()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3550,15 +3892,20 @@ class TaskSection(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _UrgentLinkDialog(_MovableDialog):
-    """긴급업무 완료 시 관련 과제/할일 진행 로그에 기록"""
+    """긴급업무 완료 시 연결 과제의 진행상황에 기록 (또는 일반 로그 기록)"""
 
     def __init__(self, db: Database, urgent_task_id: int, parent=None):
         super().__init__(parent)
         self.db = db
         self._urgent = db.get_task(urgent_task_id)
+        self._linked_id: int | None = None
+        try:
+            self._linked_id = self._urgent["linked_todo_id"]
+        except (KeyError, TypeError):
+            pass
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(440)
         self._build()
         QShortcut(QKeySequence("Escape"), self, self.reject)
 
@@ -3566,7 +3913,7 @@ class _UrgentLinkDialog(_MovableDialog):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 18, 20, 18); lay.setSpacing(12)
 
-        t = QLabel("✅  긴급업무 완료")
+        t = QLabel("긴급업무 완료")
         t.setObjectName("DialogTitle")
         t.setFont(QFont("맑은 고딕", 13, QFont.Weight.Bold))
         lay.addWidget(t)
@@ -3580,33 +3927,80 @@ class _UrgentLinkDialog(_MovableDialog):
         sep.setMaximumHeight(1); sep.setObjectName("Separator")
         lay.addWidget(sep)
 
-        lbl = QLabel("이 완료 내용을 어떤 과제/할일의 진행 로그에 기록할까요?")
-        lbl.setObjectName("FormLabel"); lbl.setWordWrap(True)
-        lay.addWidget(lbl)
+        if self._linked_id:
+            # 연결된 과제가 있으면 → 진행상황 탭에 기록
+            linked_task = self.db.get_task(self._linked_id)
+            linked_name = linked_task["title"] if linked_task else f"(ID {self._linked_id})"
 
-        self.combo = QComboBox()
-        todo_tasks = self.db.get_tasks(TASK_TODO, completed=False)
-        self.combo.addItem("(기록 안 함)", None)
-        for task in todo_tasks:
-            self.combo.addItem(task["title"], task["id"])
-        lay.addWidget(self.combo)
+            info_lbl = QLabel(
+                f"연결 과제 '{linked_name}'의\n과제진행상황에 자동 기록됩니다."
+            )
+            info_lbl.setObjectName("FormLabel")
+            info_lbl.setWordWrap(True)
+            info_lbl.setStyleSheet("color:#a6e3a1;background:transparent;")
+            lay.addWidget(info_lbl)
 
-        note_lbl = QLabel("추가 메모 (선택)")
-        note_lbl.setObjectName("FormLabel")
-        lay.addWidget(note_lbl)
-        self.ed = QPlainTextEdit()
-        self.ed.setPlaceholderText("선택 사항...")
-        self.ed.setMaximumHeight(60)
-        lay.addWidget(self.ed)
+            note_lbl = QLabel("진행 내용 (선택)")
+            note_lbl.setObjectName("FormLabel")
+            lay.addWidget(note_lbl)
+            self.ed = QPlainTextEdit()
+            self.ed.setPlaceholderText("이번 완료에서 달성한 내용, 결과 등...")
+            self.ed.setMaximumHeight(80)
+            lay.addWidget(self.ed)
 
-        br = QHBoxLayout(); br.addStretch()
-        bc = QPushButton("건너뛰기"); bc.setObjectName("SecondaryBtn")
-        bc.setFixedHeight(34); bc.clicked.connect(self.reject); br.addWidget(bc)
-        ba = QPushButton("로그 기록"); ba.setObjectName("PrimaryBtn")
-        ba.setFixedHeight(34); ba.clicked.connect(self._save); br.addWidget(ba)
-        lay.addLayout(br)
+            br = QHBoxLayout(); br.addStretch()
+            bc = QPushButton("건너뛰기"); bc.setObjectName("SecondaryBtn")
+            bc.setFixedHeight(34); bc.clicked.connect(self.reject); br.addWidget(bc)
+            ba = QPushButton("진행상황 기록"); ba.setObjectName("PrimaryBtn")
+            ba.setFixedHeight(34); ba.clicked.connect(self._save_linked); br.addWidget(ba)
+            lay.addLayout(br)
 
-    def _save(self):
+        else:
+            # 연결 없음 → 일반 로그 기록 (구 방식)
+            lbl = QLabel("완료 내용을 기록할 과제/할일을 선택하세요 (선택 사항)")
+            lbl.setObjectName("FormLabel"); lbl.setWordWrap(True)
+            lay.addWidget(lbl)
+
+            self.combo = QComboBox()
+            todo_tasks = self.db.get_tasks(TASK_TODO, completed=False)
+            self.combo.addItem("(기록 안 함)", None)
+            for task in todo_tasks:
+                self.combo.addItem(task["title"], task["id"])
+            lay.addWidget(self.combo)
+
+            note_lbl = QLabel("추가 메모 (선택)")
+            note_lbl.setObjectName("FormLabel")
+            lay.addWidget(note_lbl)
+            self.ed = QPlainTextEdit()
+            self.ed.setPlaceholderText("선택 사항...")
+            self.ed.setMaximumHeight(60)
+            lay.addWidget(self.ed)
+
+            br = QHBoxLayout(); br.addStretch()
+            bc = QPushButton("건너뛰기"); bc.setObjectName("SecondaryBtn")
+            bc.setFixedHeight(34); bc.clicked.connect(self.reject); br.addWidget(bc)
+            ba = QPushButton("로그 기록"); ba.setObjectName("PrimaryBtn")
+            ba.setFixedHeight(34); ba.clicked.connect(self._save_general); br.addWidget(ba)
+            lay.addLayout(br)
+
+    def _save_linked(self):
+        """연결 과제의 과제진행상황 탭에 progress_group 생성 + 항목 추가"""
+        note = self.ed.toPlainText().strip()
+        today = date.today().strftime("%m/%d")
+        grp_title = f"{self._urgent['title']} ({today})"
+        grp_id = self.db.add_progress_group(
+            self._linked_id, grp_title,
+            source_urgent_id=self._urgent["id"]
+        )
+        # 기본 항목: 완료 표시
+        base_content = f"긴급업무 완료"
+        if note:
+            base_content += f": {note}"
+        self.db.add_progress_log(self._linked_id, grp_id, base_content)
+        self.accept()
+
+    def _save_general(self):
+        """연결 없음: 선택한 과제의 일반 로그에 기록"""
         todo_id = self.combo.currentData()
         if todo_id is not None:
             note = self.ed.toPlainText().strip()
@@ -3761,6 +4155,27 @@ class _YearGroup(QWidget):
         self.btn_col.setText("▶" if self._collapsed else "▼")
 
     def _restore(self, tid):
+        task = self.db.get_task(tid)
+        if task and task["task_type"] == TASK_URGENT:
+            # 연결된 과제의 진행 그룹이 있는지 확인 → 경고
+            urgent_groups = self.db.get_urgent_progress_groups(tid)
+            if urgent_groups:
+                grp_titles = "\n".join(f"  • {g['title']}" for g in urgent_groups[:3])
+                msg = (
+                    f"이 긴급업무를 미완료로 복원하면\n"
+                    f"연결된 과제의 진행 그룹이 삭제됩니다:\n\n"
+                    f"{grp_titles}\n\n"
+                    f"계속하시겠습니까?"
+                )
+                r = QMessageBox.warning(
+                    self, "진행 그룹 삭제 경고", msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if r != QMessageBox.StandardButton.Yes:
+                    return
+                for g in urgent_groups:
+                    self.db.delete_progress_group(g["id"])
         self.db.toggle_complete(tid, False)
         # 부모 CompletedSection에 refresh 요청
         p = self.parent()
