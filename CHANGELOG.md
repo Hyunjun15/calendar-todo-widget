@@ -2,6 +2,18 @@
 
 ---
 
+## v3.5 — 2026-04-03
+
+### 제거
+- **UpdatePanel + WorksFileParser**: .txt 파일 자동 불러오기 기능 제거 (~411줄) — 직접 입력 방식으로 대체, 레거시 기능
+
+### 수정
+- **TitleBar**: 타이틀 레이블에 `setSizePolicy(Ignored, Preferred)` + `stretch=1` 적용, `ver_lbl` 고정폭 36px — 창 최소 너비에서 타이틀 잘림 해결
+- **CoworkTodaySection**: 헤더 `setFixedHeight(36)` → `setMinimumHeight(36)`, 수직 margin 추가 — 큰 폰트 크기에서 텍스트 헤더 이탈 해결
+- **OptionsDialog**: `setMinimumWidth(480)` → `setMinimumWidth(520)` — 테마 버튼 텍스트 잘림 해결
+
+---
+
 ## v2.25 — 2026-04-01
 
 ### 추가

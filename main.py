@@ -57,8 +57,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.4"
-APP_VERSION_DATE = "2026-04-02"
+APP_VERSION      = "v3.5"
+APP_VERSION_DATE = "2026-04-03"
 
 def resource_path(relative_path):
     """
@@ -80,7 +80,6 @@ else:
     # 개발 환경: 소스 파일이 있는 폴더 기준
     BASE_DIR = Path(__file__).parent
 
-UPDATE_WORKS    = BASE_DIR / "Update works"
 ASSETS_DIR      = BASE_DIR / "assets"
 EXPORT_DIR      = BASE_DIR / "Export"
 ATTACHMENTS_DIR = Path.home() / ".productivity_widget" / "attachments"
@@ -365,7 +364,6 @@ QWidget#TitleBar    {{ background-color: {t['mantle']}; border-bottom: 1px solid
 QWidget#CalendarWidget {{ background-color: {t['mantle']}; }}
 QWidget#SectionWidget  {{ background-color: {t['mantle']}; border: 1px solid {t['surface0']}; }}
 QWidget#SectionHeader  {{ background-color: {t['mantle']}; }}
-QWidget#UpdatePanel    {{ background-color: {t['mantle']}; }}
 
 /* ── 카드 배경 (수정 4: 라이트 테마 충돌 해결) ── */
 QFrame#TaskItem          {{ background-color: {t['task_bg']}; border: 1px solid {t['border']}; }}
@@ -425,13 +423,12 @@ QLabel#CalHeaderLabel, QLabel#MiscTitle,
 QLabel#TaskTitle, QLabel#LogContent, QLabel#TaskInfoTitle,
 QLabel#ScheduleItemName, QLabel#EventPopupDate {{ font-size: {fs}pt; }}
 QLabel#SectionStats, QLabel#FormLabel, QLabel#CalDow,
-QLabel#TaskTitleDone, QLabel#UpdateFile, QLabel#UpdateTime,
+QLabel#TaskTitleDone, QLabel#UpdateTime,
 QLabel#VersionLabel, QLabel#SourceBadge, QLabel#TaskGoal,
 QLabel#ScheduleItemMeta, QLabel#ScheduleItemContent,
 QLabel#DueBadgeFuture, QLabel#TaskInfoDesc,
 QLabel#MiscContent, QLabel#LogTimestamp {{ font-size: {fs_s}pt; }}
-QPushButton#RefreshBtn, QPushButton#AutoToggleOn,
-QPushButton#AutoToggleOff {{ font-size: {fs_s}pt; }}
+QPushButton#RefreshBtn {{ font-size: {fs_s}pt; }}
 QLineEdit, QTextEdit, QPlainTextEdit {{ font-size: {fs}pt; }}
 QComboBox, QSpinBox, QDateEdit {{ font-size: {fs}pt; }}
 """
@@ -1154,184 +1151,6 @@ def _parse_korean_date(text: str) -> str | None:
     return None
 
 
-class WorksFileParser:
-    """
-    Update works 폴더의 .txt 파일을 파싱하여
-    todo / urgent / misc 태스크 목록으로 반환.
-    """
-    # 섹션 헤더 패턴
-    SECTION_RE = re.compile(r'^\[(.+?)\]')
-    # 번호 항목 시작 패턴 (예: "1. 제목", "5, 제목")
-    ITEM_RE    = re.compile(r'^(\d+)[.,]\s*(.+)')
-
-    # 섹션 이름 → task_type 매핑
-    SECTION_MAP = {
-        "과제": TASK_TODO, "to do": TASK_TODO, "할 일": TASK_TODO,
-        "긴급": TASK_URGENT, "urgent": TASK_URGENT,
-        "기타": TASK_MISC,  "etc": TASK_MISC,
-    }
-
-    def parse(self, filepath: str | Path) -> dict[str, list[dict]]:
-        """
-        반환: {"todo": [...], "urgent": [...], "misc": [...]}
-        각 항목은 {"title", "description", "goal", "due_date", "priority"} dict
-        """
-        filepath = Path(filepath)
-        if not filepath.exists():
-            return {TASK_TODO: [], TASK_URGENT: [], TASK_MISC: []}
-
-        with open(filepath, encoding="utf-8-sig", errors="replace") as f:
-            raw = f.read()
-
-        # 섹션별로 분리
-        sections = self._split_sections(raw)
-        result = {TASK_TODO: [], TASK_URGENT: [], TASK_MISC: []}
-
-        for sec_name, content in sections.items():
-            task_type = self._match_section(sec_name)
-            if task_type == TASK_TODO:
-                result[TASK_TODO] = self._parse_structured(content)
-            elif task_type == TASK_URGENT:
-                result[TASK_URGENT] = self._parse_simple(content)
-            elif task_type == TASK_MISC:
-                result[TASK_MISC] = self._parse_misc(content)
-
-        return result
-
-    def _split_sections(self, text: str) -> dict[str, str]:
-        """본문을 섹션별로 분리"""
-        sections = {}
-        current_name = None
-        current_lines = []
-
-        for line in text.splitlines():
-            m = self.SECTION_RE.match(line.strip())
-            if m:
-                if current_name:
-                    sections[current_name] = "\n".join(current_lines)
-                current_name = m.group(1).strip()
-                current_lines = []
-            elif current_name is not None:
-                current_lines.append(line)
-
-        if current_name:
-            sections[current_name] = "\n".join(current_lines)
-        return sections
-
-    def _match_section(self, name: str) -> str | None:
-        n = name.lower()
-        for key, ttype in self.SECTION_MAP.items():
-            if key in n:
-                return ttype
-        return None
-
-    def _parse_structured(self, content: str) -> list[dict]:
-        """
-        [과제 및 To do list] 형식 파싱:
-        N. 제목
-            내용: ...
-            목표: ...
-            마감기한: ...
-        """
-        tasks = []
-        current = None
-
-        for line in content.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-
-            m = self.ITEM_RE.match(stripped)
-            if m:
-                if current:
-                    tasks.append(current)
-                current = {
-                    "title": m.group(2).strip(),
-                    "description": "", "goal": "",
-                    "due_date": None, "priority": PRIORITY_MEDIUM,
-                }
-                continue
-
-            if current is None:
-                continue
-
-            # 내용/목표/마감기한 필드 파싱 (탭 또는 공백 들여쓰기)
-            if re.match(r'^내용\s*[:：]', stripped):
-                current["description"] = re.sub(r'^내용\s*[:：]\s*', '', stripped)
-            elif re.match(r'^목표\s*[:：]', stripped):
-                current["goal"] = re.sub(r'^목표\s*[:：]\s*', '', stripped)
-            elif re.match(r'^마감기한\s*[:：]', stripped):
-                raw_date = re.sub(r'^마감기한\s*[:：]\s*', '', stripped)
-                current["due_date"] = _parse_korean_date(raw_date)
-            else:
-                # 내용의 추가 줄 (들여쓰기 없는 경우도 있음)
-                if current["description"]:
-                    current["description"] += " " + stripped
-                else:
-                    current["description"] = stripped
-
-        if current:
-            tasks.append(current)
-        return tasks
-
-    def _parse_simple(self, content: str) -> list[dict]:
-        """
-        [이번주/차주 긴급 업무] 형식 파싱:
-        N. 내용
-        """
-        tasks = []
-        for line in content.splitlines():
-            stripped = line.strip()
-            m = self.ITEM_RE.match(stripped)
-            if m:
-                tasks.append({
-                    "title": m.group(2).strip(),
-                    "description": "", "goal": "",
-                    "due_date": None, "priority": PRIORITY_HIGH,
-                })
-        return tasks
-
-    def _parse_misc(self, content: str) -> list[dict]:
-        """
-        [기타] 형식 파싱:
-        N. 제목
-        자유 텍스트 (여러 줄)
-        """
-        tasks = []
-        current = None
-
-        for line in content.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                if current and current["description"]:
-                    current["description"] += "\n"
-                continue
-
-            m = self.ITEM_RE.match(stripped)
-            if m:
-                if current:
-                    tasks.append(current)
-                current = {
-                    "title": m.group(2).strip(),
-                    "description": "", "goal": "",
-                    "due_date": None, "priority": PRIORITY_LOW,
-                }
-            elif current is not None:
-                sep = "\n" if current["description"] else ""
-                current["description"] += sep + stripped
-
-        if current:
-            tasks.append(current)
-        return tasks
-
-    @staticmethod
-    def latest_file(folder: Path) -> Path | None:
-        """Update works 폴더에서 이름 기준 최신 .txt 파일 반환"""
-        txts = sorted(folder.glob("*.txt"), reverse=True)
-        return txts[0] if txts else None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # 4-B. ICAL PARSER
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -5090,9 +4909,9 @@ class CoworkTodaySection(QWidget):
 
         # ── 헤더 ────────────────────────────────────────────────────────
         hdr = QWidget(); hdr.setObjectName("SectionHeader")
-        hdr.setFixedHeight(36)
+        hdr.setMinimumHeight(36)
         hl  = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 0, 12, 0); hl.setSpacing(8)
+        hl.setContentsMargins(12, 4, 12, 4); hl.setSpacing(8)
 
         self._col_btn = QPushButton("▼")
         self._col_btn.setFixedSize(18, 18)
@@ -5232,204 +5051,6 @@ class CoworkTodaySection(QWidget):
 # 13. UPDATE PANEL (파일 연동 컨트롤 바)
 # ═══════════════════════════════════════════════════════════════════════════
 
-class UpdatePanel(QWidget):
-    """
-    Update works 폴더의 최신 .txt 파일을 감시하고
-    수동/자동으로 위젯 데이터를 갱신하는 컨트롤 패널.
-    """
-    update_done = Signal()
-
-    def __init__(self, db: Database, parent=None):
-        super().__init__(parent)
-        self.db      = db
-        self.parser  = WorksFileParser()
-        self._auto   = True
-        self._watcher = QFileSystemWatcher(self)
-        self._watcher.directoryChanged.connect(self._on_dir_changed)
-        self._watcher.fileChanged.connect(self._on_file_changed)
-        self._current_file: Path | None = None
-
-        # 파일 크기 안정화 감지 (저장 완료 확인)
-        self._last_size   = -1
-        self._stable_count = 0
-        self._stability_timer = QTimer(self)
-        self._stability_timer.setInterval(300)
-        self._stability_timer.timeout.connect(self._check_stability)
-
-        self.setObjectName("UpdatePanel")
-        self._build()
-        self._watch_dir()
-
-    def _build(self):
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 12, 6)
-        lay.setSpacing(8)
-
-        self.lbl_file = QLabel("파일 없음")
-        self.lbl_file.setObjectName("UpdateFile")
-        self.lbl_file.setFont(QFont("맑은 고딕", 10))
-        lay.addWidget(self.lbl_file, 1)
-
-        self.lbl_status = QLabel("—")
-        self.lbl_status.setObjectName("UpdateTime")
-        self.lbl_status.setFont(QFont("맑은 고딕", 10))
-        lay.addWidget(self.lbl_status)
-
-        self.btn_auto = QPushButton("● 자동 로드  ON")
-        self.btn_auto.setObjectName("AutoToggleOn")
-        self.btn_auto.setCheckable(True)
-        self.btn_auto.setChecked(True)
-        self.btn_auto.setFixedHeight(26)
-        self.btn_auto.setToolTip("파일 변경 감지 시 자동으로 데이터 불러오기 ON/OFF")
-        self.btn_auto.toggled.connect(self._toggle_auto)
-        lay.addWidget(self.btn_auto)
-
-        self.btn_refresh = QPushButton("🔄 지금 불러오기")
-        self.btn_refresh.setObjectName("RefreshBtn")
-        self.btn_refresh.setFixedHeight(26)
-        self.btn_refresh.setToolTip("Update works 최신 파일을 지금 바로 불러옵니다")
-        self.btn_refresh.clicked.connect(self.do_update)
-        lay.addWidget(self.btn_refresh)
-
-        self.btn_ver = QPushButton("🔍 버전 확인")
-        self.btn_ver.setObjectName("RefreshBtn")
-        self.btn_ver.setFixedHeight(26)
-        self.btn_ver.setToolTip("GitHub에서 최신 버전을 확인합니다")
-        self.btn_ver.clicked.connect(self._check_github_version)
-        lay.addWidget(self.btn_ver)
-
-    def _watch_dir(self):
-        UPDATE_WORKS.mkdir(exist_ok=True)
-        self._watcher.addPath(str(UPDATE_WORKS))
-        latest = WorksFileParser.latest_file(UPDATE_WORKS)
-        if latest:
-            self._set_file(latest)
-
-    def _set_file(self, path: Path):
-        if self._current_file and str(self._current_file) in self._watcher.files():
-            self._watcher.removePath(str(self._current_file))
-        self._current_file = path
-        self._watcher.addPath(str(path))
-        self.lbl_file.setText(f"📁 {path.name}")
-
-    def _on_dir_changed(self, _):
-        latest = WorksFileParser.latest_file(UPDATE_WORKS)
-        if latest and latest != self._current_file:
-            self._set_file(latest)
-            if self._auto:
-                self._start_stability_check()
-
-    def _on_file_changed(self, path: str):
-        """파일 변경 감지 → 크기 안정화 확인 후 파싱"""
-        if self._auto:
-            self._start_stability_check()
-        # 일부 에디터는 파일을 지웠다 다시 씀 → 재등록
-        if path not in self._watcher.files():
-            self._watcher.addPath(path)
-
-    def _start_stability_check(self):
-        """파일 크기가 안정될 때까지 대기 후 파싱"""
-        self._last_size   = -1
-        self._stable_count = 0
-        self._stability_timer.start()
-
-    def _check_stability(self):
-        """300ms 간격으로 파일 크기 체크 — 2회 연속 동일하면 파싱"""
-        if not self._current_file or not self._current_file.exists():
-            self._stability_timer.stop()
-            return
-        size = self._current_file.stat().st_size
-        if size == self._last_size:
-            self._stable_count += 1
-            if self._stable_count >= 2:           # 600ms 안정 → 파싱 실행
-                self._stability_timer.stop()
-                self.do_update()
-        else:
-            self._last_size    = size
-            self._stable_count = 0
-
-    def _toggle_auto(self, on: bool):
-        self._auto = on
-        self.btn_auto.setText("● 자동 로드  ON" if on else "○ 자동 로드  OFF")
-        self.btn_auto.setObjectName("AutoToggleOn" if on else "AutoToggleOff")
-        self.btn_auto.style().unpolish(self.btn_auto)
-        self.btn_auto.style().polish(self.btn_auto)
-
-    def do_update(self):
-        """최신 txt 파일에서 신규 항목만 DB에 추가 — 기존 항목은 절대 변경 안 함"""
-        f = WorksFileParser.latest_file(UPDATE_WORKS)
-        if not f:
-            self._set_status("파일 없음", "#6c7086")
-            return
-        if f != self._current_file:
-            self._set_file(f)
-        try:
-            parsed = self.parser.parse(f)
-            added = (
-                self.db.sync_from_file(TASK_TODO,   parsed[TASK_TODO])
-                + self.db.sync_from_file(TASK_URGENT, parsed[TASK_URGENT])
-                + self.db.sync_from_file(TASK_MISC,   parsed[TASK_MISC])
-            )
-            now_str = datetime.now().strftime("%H:%M:%S")
-            if added > 0:
-                self._set_status(f"✅ {now_str}  +{added}개 추가됨", "#a6e3a1")
-            else:
-                self._set_status(f"✅ {now_str}  새 항목 없음", "#6c7086")
-            self.update_done.emit()
-        except Exception as e:
-            self._set_status(f"⚠ 파싱 실패: {type(e).__name__}", "#f38ba8")
-
-    def _set_status(self, text: str, color: str):
-        self.lbl_status.setText(text)
-        self.lbl_status.setStyleSheet(f"color:{color};font-size:11px;")
-
-    def latest_filename(self) -> str:
-        f = WorksFileParser.latest_file(UPDATE_WORKS)
-        return f.name if f else "없음"
-
-    def _check_github_version(self):
-        """GitHub Releases API로 최신 버전 확인"""
-        self.btn_ver.setEnabled(False)
-        self.btn_ver.setText("확인 중...")
-        try:
-            import json as _json
-            url = "https://api.github.com/repos/Hyunjun15/calendar-todo-widget/releases/latest"
-            req = urllib.request.Request(url, headers={"User-Agent": "CalendarTodoWidget"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = _json.loads(resp.read().decode())
-            latest_tag = data.get("tag_name", "")
-            release_url = data.get("html_url", "")
-            if latest_tag and latest_tag != APP_VERSION:
-                msg = (
-                    f"새 버전이 있습니다!\n\n"
-                    f"현재: {APP_VERSION}  →  최신: {latest_tag}\n\n"
-                    f"GitHub에서 다운로드하시겠습니까?\n{release_url}"
-                )
-                r = QMessageBox.information(
-                    self, "업데이트 가능", msg,
-                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Open,
-                )
-                if r == QMessageBox.StandardButton.Open and release_url:
-                    import subprocess
-                    subprocess.Popen(["start", "", release_url], shell=True)
-            else:
-                QMessageBox.information(
-                    self, "최신 버전", f"현재 최신 버전입니다 ({APP_VERSION}).",
-                    QMessageBox.StandardButton.Ok,
-                )
-        except Exception as e:
-            QMessageBox.warning(
-                self, "연결 실패",
-                f"GitHub 연결에 실패했습니다.\n{type(e).__name__}: {e}",
-                QMessageBox.StandardButton.Ok,
-            )
-        finally:
-            self.btn_ver.setEnabled(True)
-            self.btn_ver.setText("🔍 버전 확인")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # 13-C. EXPORT DIALOG (업무 보고용 내보내기)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -5758,7 +5379,7 @@ class OptionsDialog(_MovableDialog):
         self.settings = settings
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(520)
         self._build()
         self._load_settings()
         QShortcut(QKeySequence("Escape"), self, self.reject)
@@ -6553,13 +6174,14 @@ class TitleBar(QWidget):
         nm.setObjectName("TitleLabel")
         nm.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
         nm.setToolTip(f"버전 {APP_VERSION}  ({APP_VERSION_DATE})")
-        lay.addWidget(nm)
+        nm.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        lay.addWidget(nm, 1)
 
         ver_lbl = QLabel(APP_VERSION)
         ver_lbl.setObjectName("VersionLabel")
         ver_lbl.setToolTip(f"업데이트: {APP_VERSION_DATE}")
+        ver_lbl.setFixedWidth(36)
         lay.addWidget(ver_lbl)
-        lay.addStretch()
 
         self.btn_backup = QPushButton("💾")
         self.btn_backup.setObjectName("TitleBtn")
@@ -6627,8 +6249,6 @@ class MainWindow(QWidget):
         self._setup_ical_notif_timer()
         self._position()
         self._restore()
-        # 시작 시 최신 파일 자동 로드
-        QTimer.singleShot(300, self.update_panel.do_update)
         # 시작 1분 후 첫 마감일 알림 체크
         QTimer.singleShot(60_000, self._check_deadlines)
         # 시작 3초 후 첨부 파일 경로 누락 체크
@@ -6676,9 +6296,6 @@ class MainWindow(QWidget):
 
         self.tb = TitleBar(self)
         lay.addWidget(self.tb)
-
-        self.update_panel = UpdatePanel(self.db, self)
-        lay.addWidget(self.update_panel)
 
         sep = QFrame(); sep.setObjectName("Separator")
         sep.setFrameShape(QFrame.Shape.HLine); sep.setMaximumHeight(1)
@@ -6736,7 +6353,6 @@ class MainWindow(QWidget):
         self.tb.btn_backup.clicked.connect(self._open_backup)
         self.tb.btn_export.clicked.connect(self._open_export)
         self.tb.btn_options.clicked.connect(self._open_options)
-        self.update_panel.update_done.connect(self._refresh_all)
         self.sec_todo.completion_changed.connect(self.sec_completed.refresh)
         self.sec_urgent.completion_changed.connect(self.sec_completed.refresh)
         # 달력 날짜 선택 → 태스크 하이라이트 연동
@@ -7190,7 +6806,7 @@ class MainWindow(QWidget):
         """
         prev_state = self._collapse_state
         self._collapse_state = state
-        sections = [self.update_panel, self.sec_todo, self.sec_urgent,
+        sections = [self.sec_todo, self.sec_urgent,
                     self.sec_schedule, self.sec_misc, self.sec_personal]
         if state == 0:
             for w in sections: w.setVisible(True)
@@ -7427,33 +7043,6 @@ class MainWindow(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 EXTRA_QSS = """
-/* ── 업데이트 패널 ───────────────────────────────────────── */
-QWidget#UpdatePanel {
-    background-color: #11111b;
-    border-bottom: 1px solid #2a2a3d;
-}
-QLabel#UpdateFile  { color: #89b4fa; font-size: 11px; font-weight: bold; }
-QLabel#UpdateTime  { color: #45475a; font-size: 11px; }
-
-QPushButton#RefreshBtn {
-    background: #27273a; border-radius: 6px; border: 1px solid #3d3d58;
-    color: #89b4fa; font-size: 11px; padding: 0 10px;
-}
-QPushButton#RefreshBtn:hover { background: #313244; border-color: #89b4fa; }
-
-QPushButton#AutoToggleOn {
-    background: rgba(137,180,250,0.15); border-radius: 6px;
-    border: 1px solid rgba(137,180,250,0.4);
-    color: #89b4fa; font-size: 11px; padding: 0 8px; font-weight: bold;
-}
-QPushButton#AutoToggleOn:hover { background: rgba(137,180,250,0.25); }
-
-QPushButton#AutoToggleOff {
-    background: #27273a; border-radius: 6px; border: 1px solid #3d3d58;
-    color: #45475a; font-size: 11px; padding: 0 8px;
-}
-QPushButton#AutoToggleOff:hover { background: #313244; color: #6c7086; }
-
 QLabel#TaskGoal { font-size: 11px; color: #cdd6f4; font-style: italic; }
 QLabel#SourceBadge { font-size: 10px; color: #45475a; background: #22223a; border-radius: 3px; padding: 0 4px; }
 
