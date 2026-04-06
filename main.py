@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.11"
+APP_VERSION      = "v3.12"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -3806,6 +3806,8 @@ class TaskSection(QWidget):
         if self.task_type == TASK_URGENT:
             tl.setToolTip("이번 주 처리해야 하는 단기 업무.\n과제/할 일(장기 관리)과 구분해서 사용하세요.")
         title_row.addWidget(tl); title_row.addStretch()
+        lbl_sort = QLabel("정렬:"); lbl_sort.setObjectName("SectionStats")
+        title_row.addWidget(lbl_sort)
         self.cb_sort = QComboBox()
         self.cb_sort.setFixedHeight(24)
         self.cb_sort.setFixedWidth(90)
@@ -4838,6 +4840,7 @@ class ScheduleSection(QWidget):
         # 추가 버튼 (단기일정 / 휴가 / 교육 통합)
         btn_add = QPushButton("＋  일정 추가")
         btn_add.setObjectName("AddTaskBtn"); btn_add.setMinimumHeight(34)
+        btn_add.setToolTip("새 일정 추가")
         btn_add.clicked.connect(lambda: self._add())
         b_lay.addWidget(btn_add)
 
@@ -6208,7 +6211,7 @@ class TitleBar(QWidget):
         ver_lbl = QLabel(APP_VERSION)
         ver_lbl.setObjectName("VersionLabel")
         ver_lbl.setToolTip(f"업데이트: {APP_VERSION_DATE}")
-        ver_lbl.setFixedWidth(36)
+        ver_lbl.setFixedWidth(46)
         lay.addWidget(ver_lbl)
 
         self.btn_backup = QPushButton("💾")
