@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.10"
+APP_VERSION      = "v3.11"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -3019,6 +3019,7 @@ class LogItemWidget(QFrame):
         bd = QPushButton("✕")
         bd.setObjectName("LogDeleteBtn")
         bd.setFixedSize(22, 22)
+        bd.setToolTip("삭제")
         bd.clicked.connect(lambda: self.delete_requested.emit(self.log_id))
         th.addWidget(bd)
         cl.addLayout(th)

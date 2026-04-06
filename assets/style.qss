@@ -476,7 +476,7 @@ QFrame#LogItem {
 
 QLabel#LogTimestamp {
     font-size: 11px;
-    color: #585b70;
+    color: #6c7086;
     font-weight: bold;
 }
 QLabel#LogContent {
