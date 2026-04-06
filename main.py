@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.7"
+APP_VERSION      = "v3.8"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -1744,7 +1744,7 @@ class CalendarWidget(QWidget):
         self.lbl_ym.setObjectName("CalHeaderLabel")
         self.lbl_ym.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_ym.setFont(QFont("맑은 고딕", 13, QFont.Weight.Bold))
-        self.lbl_ym.setToolTip("날짜를 더블클릭하면 일정을 추가할 수 있습니다")
+        self.lbl_ym.setToolTip("날짜를 더블클릭하면 일정을 추가할 수 있습니다\n우클릭하면 일정·개인업무 추가 옵션이 나타납니다")
         hdr.addWidget(self.lbl_ym, 1)
 
         self.btn_next = QPushButton("▶")
@@ -2728,7 +2728,7 @@ class TaskDialog(_MovableDialog):
 
         # 색상 선택 (todo / personal 만)
         if self._task_type in (TASK_TODO, TASK_PERSONAL):
-            lay.addWidget(lbl("태스크 색상"))
+            lay.addWidget(lbl("항목 색상"))
             color_row = QHBoxLayout()
             color_row.setSpacing(6)
             self._color_btns: list[QPushButton] = []
@@ -2780,7 +2780,7 @@ class TaskDialog(_MovableDialog):
             drop_lay.setSpacing(2)
 
             self._file_empty_lbl = QLabel("파일을 여기에 드래그하거나 아래 버튼으로 추가하세요")
-            self._file_empty_lbl.setStyleSheet("color:#45475a;font-size:11px;")
+            self._file_empty_lbl.setStyleSheet("color:#6c7086;font-size:11px;")
             self._file_empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             drop_lay.addWidget(self._file_empty_lbl)
 
@@ -4926,6 +4926,7 @@ class CoworkTodaySection(QWidget):
         self._col_btn = QPushButton("▼")
         self._col_btn.setFixedSize(18, 18)
         self._col_btn.setObjectName("CollapseBtn")
+        self._col_btn.setToolTip("섹션 접기/펼치기")
         self._col_btn.clicked.connect(self._toggle_collapse)
         hl.addWidget(self._col_btn)
 
@@ -6404,7 +6405,7 @@ class MainWindow(QWidget):
         lay.addWidget(icon_lbl)
 
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("제목, 내용, 목표로 검색... (Esc: 닫기)")
+        self._search_edit.setPlaceholderText("할 일·긴급·개인업무 검색... (Esc: 닫기)")
         self._search_edit.setObjectName("SearchEdit")
         self._search_edit.textChanged.connect(self._on_search)
         lay.addWidget(self._search_edit, 1)
