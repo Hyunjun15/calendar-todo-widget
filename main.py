@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.15"
+APP_VERSION      = "v3.16"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -5716,6 +5716,22 @@ class OptionsDialog(_MovableDialog):
         btn_feedback.clicked.connect(self._send_feedback)
         lay.addWidget(btn_feedback)
 
+        lay.addSpacing(16)
+        sep_up = QFrame(); sep_up.setFrameShape(QFrame.Shape.HLine)
+        sep_up.setMaximumHeight(1); lay.addWidget(sep_up)
+        lay.addSpacing(8)
+        lay.addWidget(self._lbl("앱 업데이트"))
+        up_row = QHBoxLayout(); up_row.setSpacing(8)
+        self.btn_check_update = QPushButton("⬆  업데이트 확인")
+        self.btn_check_update.setObjectName("SecondaryBtn")
+        self.btn_check_update.setFixedHeight(34)
+        self.btn_check_update.clicked.connect(self._check_github_version)
+        up_row.addWidget(self.btn_check_update)
+        self.lbl_update_status = QLabel(f"현재: {APP_VERSION}")
+        self.lbl_update_status.setStyleSheet("color:#6c7086;font-size:11px;")
+        up_row.addWidget(self.lbl_update_status, 1)
+        lay.addLayout(up_row)
+
         lay.addStretch()
         self.tabs.addTab(w, "📋  섹션 설정")
 
@@ -5985,6 +6001,58 @@ class OptionsDialog(_MovableDialog):
             f"&body={urllib.parse.quote(body)}"
         )
         QDesktopServices.openUrl(QUrl(mailto))
+
+    def _check_github_version(self):
+        """GitHub Releases API로 최신 버전 확인 후 업데이트 안내"""
+        self.btn_check_update.setEnabled(False)
+        self.btn_check_update.setText("확인 중...")
+        self.lbl_update_status.setText("GitHub에 연결 중...")
+        QApplication.processEvents()
+        try:
+            import json as _json
+            url = "https://api.github.com/repos/Hyunjun15/calendar-todo-widget/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "CalendarTodoWidget"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = _json.loads(resp.read().decode())
+            latest_tag = data.get("tag_name", "")
+            release_url = data.get("html_url", "")
+            release_body = data.get("body", "")
+            if latest_tag and latest_tag != APP_VERSION:
+                self.lbl_update_status.setText(f"🆕 새 버전: {latest_tag}")
+                self.lbl_update_status.setStyleSheet("color:#a6e3a1;font-size:11px;font-weight:bold;")
+                notes_preview = release_body[:200].replace("\r\n", "\n") if release_body else ""
+                msg = (
+                    f"새 버전이 있습니다!\n\n"
+                    f"현재: {APP_VERSION}  →  최신: {latest_tag}\n\n"
+                    + (f"변경 내용:\n{notes_preview}\n\n" if notes_preview else "")
+                    + f"GitHub 릴리즈 페이지를 열겠습니까?\n{release_url}"
+                )
+                r = QMessageBox.information(
+                    self, "업데이트 가능", msg,
+                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Open,
+                )
+                if r == QMessageBox.StandardButton.Open and release_url:
+                    QDesktopServices.openUrl(QUrl(release_url))
+            else:
+                self.lbl_update_status.setText(f"✅ 최신 버전 ({APP_VERSION})")
+                self.lbl_update_status.setStyleSheet("color:#6c7086;font-size:11px;")
+                QMessageBox.information(
+                    self, "최신 버전",
+                    f"현재 최신 버전입니다 ({APP_VERSION}).",
+                    QMessageBox.StandardButton.Ok,
+                )
+        except Exception as e:
+            self.lbl_update_status.setText("⚠ 연결 실패")
+            self.lbl_update_status.setStyleSheet("color:#f38ba8;font-size:11px;")
+            QMessageBox.warning(
+                self, "연결 실패",
+                f"GitHub에 연결할 수 없습니다.\n\n{e}\n\n인터넷 연결을 확인하세요.",
+                QMessageBox.StandardButton.Ok,
+            )
+        finally:
+            self.btn_check_update.setEnabled(True)
+            self.btn_check_update.setText("⬆  업데이트 확인")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
