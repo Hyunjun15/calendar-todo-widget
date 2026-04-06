@@ -38,3 +38,7 @@ Desktop.ini
 *.swp
 *.swo
 Update works/
+
+# ── 개발 중 트러블슈팅 스크린샷 ──────────────────
+troubleshooting_screenshots/
+*.png

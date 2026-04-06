@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.19"
+APP_VERSION      = "v3.20"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -2778,27 +2778,41 @@ class TaskDialog(_MovableDialog):
         # 첨부 파일 (여러 개 — 클릭 선택 또는 드래그앤드롭)
         if self._task_type in (TASK_TODO, TASK_URGENT, TASK_MISC):
             lay.addWidget(lbl("📎  첨부 파일"))
-            # 드롭 영역 (파일 목록 + 안내 문구 포함)
             self._drop_area = QFrame()
             self._drop_area.setObjectName("FileDropArea")
-            self._drop_area.setStyleSheet(
-                "QFrame#FileDropArea{border:1px dashed #45475a;border-radius:6px;"
-                "background:#1e1e2e;min-height:36px;}"
-            )
             self._drop_area.setAcceptDrops(True)
             self._drop_area.dragEnterEvent = self._file_drag_enter
+            self._drop_area.dragLeaveEvent = self._file_drag_leave
             self._drop_area.dropEvent      = self._file_drop
+            self._drop_area.mousePressEvent = lambda e: self._add_file() if e.button() == Qt.MouseButton.LeftButton else None
+            self._drop_area.setCursor(Qt.CursorShape.PointingHandCursor)
             drop_lay = QVBoxLayout(self._drop_area)
-            drop_lay.setContentsMargins(8, 6, 8, 6)
-            drop_lay.setSpacing(2)
+            drop_lay.setContentsMargins(10, 10, 10, 8)
+            drop_lay.setSpacing(4)
 
-            self._file_empty_lbl = QLabel("파일을 여기에 드래그하거나 아래 버튼으로 추가하세요")
-            self._file_empty_lbl.setStyleSheet("color:#6c7086;font-size:11px;")
-            self._file_empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            drop_lay.addWidget(self._file_empty_lbl)
+            # 빈 상태 힌트
+            hint_w = QWidget()
+            hint_w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            hint_lay = QVBoxLayout(hint_w)
+            hint_lay.setContentsMargins(0, 4, 0, 4)
+            hint_lay.setSpacing(2)
+            hint_icon = QLabel("📂")
+            hint_icon.setStyleSheet("font-size:22px;background:transparent;color:#45475a;")
+            hint_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint_lay.addWidget(hint_icon)
+            hint_text = QLabel("드래그하거나 클릭해서 파일 추가")
+            hint_text.setStyleSheet("color:#6c7086;font-size:11px;background:transparent;")
+            hint_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint_lay.addWidget(hint_text)
+            hint_sub = QLabel("여러 개 선택 가능")
+            hint_sub.setStyleSheet("color:#45475a;font-size:10px;background:transparent;")
+            hint_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint_lay.addWidget(hint_sub)
+            self._file_empty_lbl = hint_w
+            drop_lay.addWidget(hint_w)
 
             self._file_list_lay = QVBoxLayout()
-            self._file_list_lay.setSpacing(2)
+            self._file_list_lay.setSpacing(3)
             self._file_list_lay.setContentsMargins(0, 0, 0, 0)
             drop_lay.addLayout(self._file_list_lay)
             lay.addWidget(self._drop_area)
@@ -2806,12 +2820,6 @@ class TaskDialog(_MovableDialog):
             self._pending_files: list[str] = []
             self._removed_file_ids: list[int] = []
             self._existing_files: list = []
-
-            btn_add_file = QPushButton("📂  파일 선택 (여러 개 가능)")
-            btn_add_file.setObjectName("SecondaryBtn")
-            btn_add_file.setFixedHeight(34)
-            btn_add_file.clicked.connect(self._add_file)
-            lay.addWidget(btn_add_file)
             self.ed_fpath = None
         else:
             self.ed_fpath = None
@@ -2866,8 +2874,22 @@ class TaskDialog(_MovableDialog):
     def _file_drag_enter(self, e):
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
+            self._drop_area.setStyleSheet(
+                "QFrame#FileDropArea{border:2px dashed #89b4fa;border-radius:10px;"
+                "background:#1a1a30;min-height:90px;}"
+            )
+
+    def _file_drag_leave(self, e):
+        self._drop_area.setStyleSheet(
+            "QFrame#FileDropArea{border:2px dashed #45475a;border-radius:10px;"
+            "background:#181825;min-height:90px;}"
+        )
 
     def _file_drop(self, e):
+        self._drop_area.setStyleSheet(
+            "QFrame#FileDropArea{border:2px dashed #45475a;border-radius:10px;"
+            "background:#181825;min-height:90px;}"
+        )
         for url in e.mimeData().urls():
             path = url.toLocalFile()
             if path and path not in self._pending_files:
@@ -2890,21 +2912,62 @@ class TaskDialog(_MovableDialog):
         # 파일이 추가되면 빈 상태 안내 숨김
         if hasattr(self, "_file_empty_lbl"):
             self._file_empty_lbl.hide()
-        row_w = QWidget()
+        row_w = QFrame()
+        row_w.setStyleSheet(
+            "QFrame{background:#22223a;border-radius:6px;border:1px solid #2e2e48;}"
+            "QFrame:hover{background:#2a2a46;border-color:#45475a;}"
+        )
         row_lay = QHBoxLayout(row_w)
-        row_lay.setContentsMargins(0, 0, 0, 0)
-        row_lay.setSpacing(4)
+        row_lay.setContentsMargins(8, 4, 6, 4)
+        row_lay.setSpacing(6)
+
+        # 확장자로 아이콘 선택
+        ext = Path(path).suffix.lower()
+        if ext in ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'):
+            icon = "🖼"
+        elif ext in ('.pdf',):
+            icon = "📕"
+        elif ext in ('.doc', '.docx', '.hwp', '.txt', '.md'):
+            icon = "📝"
+        elif ext in ('.xls', '.xlsx', '.csv'):
+            icon = "📊"
+        elif ext in ('.zip', '.rar', '.7z', '.tar', '.gz'):
+            icon = "📦"
+        elif ext in ('.py', '.js', '.ts', '.java', '.cpp', '.c', '.h'):
+            icon = "💻"
+        else:
+            icon = "📄"
 
         fname = Path(path).name
-        lbl_name = QLabel(f"📄 {fname}")
-        lbl_name.setObjectName("FormLabel")
+        lbl_icon = QLabel(icon)
+        lbl_icon.setStyleSheet("font-size:13px;background:transparent;")
+        row_lay.addWidget(lbl_icon)
+
+        lbl_name = QLabel(fname)
+        lbl_name.setStyleSheet("color:#cdd6f4;font-size:11px;background:transparent;")
         lbl_name.setToolTip(path)
         lbl_name.setWordWrap(False)
         row_lay.addWidget(lbl_name, 1)
 
+        # 파일 크기 표시
+        try:
+            sz = Path(path).stat().st_size
+            if sz < 1024:
+                sz_str = f"{sz}B"
+            elif sz < 1024 * 1024:
+                sz_str = f"{sz//1024}KB"
+            else:
+                sz_str = f"{sz//(1024*1024)}MB"
+        except Exception:
+            sz_str = ""
+        if sz_str:
+            lbl_sz = QLabel(sz_str)
+            lbl_sz.setStyleSheet("color:#6c7086;font-size:10px;background:transparent;")
+            row_lay.addWidget(lbl_sz)
+
         btn_rm = QPushButton("✕")
         btn_rm.setObjectName("TaskDeleteBtn")
-        btn_rm.setFixedSize(22, 22)
+        btn_rm.setFixedSize(20, 20)
         if is_existing and file_id is not None:
             fid = file_id
             btn_rm.clicked.connect(lambda _, w=row_w, fid=fid, p=path: self._remove_existing_file(w, fid, p))
@@ -4322,10 +4385,12 @@ class _CompletedItem(QFrame):
     """완료업무 섹션의 단일 항목"""
     restore_requested = Signal(int)
     delete_requested  = Signal(int)
+    edit_requested    = Signal(int)
 
-    def __init__(self, task_row, parent=None):
+    def __init__(self, task_row, db=None, parent=None):
         super().__init__(parent)
         self._id = task_row["id"]
+        self._db = db
         self._detail_visible = False
         self.setObjectName("TaskItemCompleted")
         self.setMinimumHeight(38)
@@ -4369,7 +4434,13 @@ class _CompletedItem(QFrame):
         _desc = r["description"] or ""
         _goal = r["goal"] or ""
         _fpath = r["file_path"] or ""
-        _has_detail = bool(_desc or _goal or _fpath)
+        _task_files = []
+        if self._db is not None:
+            try:
+                _task_files = self._db.get_task_files(self._id)
+            except Exception:
+                _task_files = []
+        _has_detail = bool(_desc or _goal or _fpath or _task_files)
         if _has_detail:
             self._btn_detail = QPushButton("▸")
             self._btn_detail.setObjectName("SectionCollapseBtn")
@@ -4413,6 +4484,7 @@ class _CompletedItem(QFrame):
                 d.setStyleSheet("color:#a6adc8;font-size:11px;background:transparent;")
                 d.setWordWrap(True)
                 dl.addWidget(d)
+            # 레거시 단일 파일
             if _fpath:
                 fp = _fpath
                 f_lbl = QLabel(f"📎 {fp}")
@@ -4425,6 +4497,34 @@ class _CompletedItem(QFrame):
                 f_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
                 f_lbl.mousePressEvent = lambda _e, p=fp: open_file_path(p, self)
                 dl.addWidget(f_lbl)
+            # 다중 첨부 파일 (task_files 테이블)
+            for tf in _task_files:
+                disp_path = tf["copy_path"] or tf["original_path"] or ""
+                fname = tf["filename"] or Path(disp_path).name if disp_path else "파일"
+                f_row = QHBoxLayout()
+                f_icon = QLabel("📎")
+                f_icon.setStyleSheet("font-size:11px;background:transparent;color:#89b4fa;")
+                f_row.addWidget(f_icon)
+                f_lbl2 = QLabel(fname)
+                f_lbl2.setStyleSheet(
+                    "color:#89b4fa;font-size:10px;background:transparent;"
+                    "text-decoration:underline;"
+                )
+                f_lbl2.setToolTip(disp_path)
+                f_lbl2.setCursor(Qt.CursorShape.PointingHandCursor)
+                f_lbl2.mousePressEvent = lambda _e, p=disp_path: open_file_path(p, self)
+                f_row.addWidget(f_lbl2, 1)
+                # 경로 복사 버튼
+                btn_cp = QPushButton("⎘")
+                btn_cp.setFixedSize(18, 18)
+                btn_cp.setToolTip(f"경로 복사: {disp_path}")
+                btn_cp.setStyleSheet(
+                    "QPushButton{background:transparent;border:none;color:#6c7086;font-size:11px;}"
+                    "QPushButton:hover{color:#89b4fa;}"
+                )
+                btn_cp.clicked.connect(lambda _, p=disp_path: QApplication.clipboard().setText(p))
+                f_row.addWidget(btn_cp)
+                dl.addLayout(f_row)
             self._detail_w.hide()
             outer.addWidget(self._detail_w)
 
@@ -4437,6 +4537,11 @@ class _CompletedItem(QFrame):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag_start = e.position().toPoint()
         super().mousePressEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.edit_requested.emit(self._id)
+        super().mouseDoubleClickEvent(e)
 
     def mouseMoveEvent(self, e):
         if not (e.buttons() & Qt.MouseButton.LeftButton):
@@ -4508,9 +4613,10 @@ class _YearGroup(QWidget):
         body_l.setContentsMargins(4, 4, 0, 0)
         body_l.setSpacing(3)
         for t in self._tasks:
-            w = _CompletedItem(t)
+            w = _CompletedItem(t, db=self.db)
             w.restore_requested.connect(self._restore)
             w.delete_requested.connect(self._delete)
+            w.edit_requested.connect(self._edit_item)
             body_l.addWidget(w)
         lay.addWidget(self.body)
         self.body.hide()
@@ -4559,6 +4665,28 @@ class _YearGroup(QWidget):
             QMessageBox.StandardButton.No)
         if r == QMessageBox.StandardButton.Yes:
             self.db.delete_task(tid)
+            p = self.parent()
+            while p:
+                if isinstance(p, CompletedSection):
+                    p.refresh(); break
+                p = p.parent()
+
+    def _edit_item(self, tid):
+        r = QMessageBox.question(self, "완료 항목 편집",
+            "완료된 항목을 편집하시겠습니까?\n(완료 상태는 유지됩니다)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        task = self.db.get_task(tid)
+        if not task:
+            return
+        dlg = TaskDialog(
+            self.db, task["task_type"],
+            is_edit=True, task_id=tid,
+            parent=self.window()
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             p = self.parent()
             while p:
                 if isinstance(p, CompletedSection):
@@ -5715,7 +5843,7 @@ class OptionsDialog(_MovableDialog):
         lay.addSpacing(8)
         lay.addWidget(self._lbl("앱 업데이트"))
         up_row = QHBoxLayout(); up_row.setSpacing(8)
-        self.btn_check_update = QPushButton("⬆  업데이트 확인")
+        self.btn_check_update = QPushButton("⬆  버전 선택 / 업데이트")
         self.btn_check_update.setObjectName("SecondaryBtn")
         self.btn_check_update.setFixedHeight(34)
         self.btn_check_update.clicked.connect(self._check_github_version)
@@ -6053,56 +6181,264 @@ class OptionsDialog(_MovableDialog):
         QDesktopServices.openUrl(QUrl(mailto))
 
     def _check_github_version(self):
-        """GitHub Releases API로 최신 버전 확인 후 업데이트 안내"""
-        self.btn_check_update.setEnabled(False)
-        self.btn_check_update.setText("확인 중...")
-        self.lbl_update_status.setText("GitHub에 연결 중...")
-        QApplication.processEvents()
+        """GitHub Releases 업데이트 다이얼로그 열기"""
+        dlg = AppUpdateDialog(parent=self)
+        dlg.exec()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 14-A2. 앱 업데이트 다이얼로그 (버전 선택 + 다운로드)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class AppUpdateDialog(_MovableDialog):
+    """GitHub Releases에서 버전 목록을 불러와 선택·다운로드하는 다이얼로그"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        self.resize(560, 520)
+        self._releases: list[dict] = []
+        self._build()
+        QShortcut(QKeySequence("Escape"), self, self.accept)
+        # 다이얼로그 표시 후 바로 릴리즈 목록 로드
+        QTimer.singleShot(100, self._fetch_releases)
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(12)
+
+        # ── 타이틀 ─────────────────────────────────────────────────────────
+        title_row = QHBoxLayout()
+        title = QLabel("⬆  버전 업데이트")
+        title.setObjectName("DialogTitle")
+        title.setFont(QFont("맑은 고딕", 14, QFont.Weight.Bold))
+        title_row.addWidget(title, 1)
+        btn_close = QPushButton("✕")
+        btn_close.setObjectName("TitleBarBtn")
+        btn_close.setFixedSize(28, 28)
+        btn_close.clicked.connect(self.accept)
+        title_row.addWidget(btn_close)
+        lay.addLayout(title_row)
+
+        # 현재 버전 표시
+        cur_lbl = QLabel(f"현재 버전: {APP_VERSION}  |  업데이트 날짜: {APP_VERSION_DATE}")
+        cur_lbl.setStyleSheet("color:#6c7086;font-size:11px;")
+        lay.addWidget(cur_lbl)
+
+        # ── 상태 레이블 ────────────────────────────────────────────────────
+        self.lbl_status = QLabel("GitHub에서 버전 목록을 불러오는 중...")
+        self.lbl_status.setStyleSheet("color:#a6adc8;font-size:12px;")
+        lay.addWidget(self.lbl_status)
+
+        # ── 버전 목록 + 릴리즈 노트 스플리터 ──────────────────────────────
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
+        splitter.setChildrenCollapsible(False)
+
+        # 왼쪽: 버전 목록
+        left_w = QWidget()
+        left_lay = QVBoxLayout(left_w)
+        left_lay.setContentsMargins(0, 0, 4, 0)
+        left_lay.setSpacing(4)
+        lbl_list = QLabel("버전 선택")
+        lbl_list.setStyleSheet("color:#89b4fa;font-size:11px;font-weight:bold;")
+        left_lay.addWidget(lbl_list)
+        self.list_versions = QListWidget()
+        self.list_versions.setObjectName("LogList")
+        self.list_versions.setAlternatingRowColors(False)
+        self.list_versions.currentRowChanged.connect(self._on_version_selected)
+        left_lay.addWidget(self.list_versions)
+        splitter.addWidget(left_w)
+
+        # 오른쪽: 릴리즈 노트
+        right_w = QWidget()
+        right_lay = QVBoxLayout(right_w)
+        right_lay.setContentsMargins(4, 0, 0, 0)
+        right_lay.setSpacing(4)
+        lbl_notes = QLabel("변경 내역")
+        lbl_notes.setStyleSheet("color:#89b4fa;font-size:11px;font-weight:bold;")
+        right_lay.addWidget(lbl_notes)
+        self.txt_notes = QPlainTextEdit()
+        self.txt_notes.setReadOnly(True)
+        self.txt_notes.setObjectName("LogInput")
+        self.txt_notes.setPlaceholderText("버전을 선택하면 변경 내역이 표시됩니다")
+        right_lay.addWidget(self.txt_notes)
+        splitter.addWidget(right_w)
+        splitter.setSizes([200, 340])
+        lay.addWidget(splitter, 1)
+
+        # ── 다운로드 진행 바 ────────────────────────────────────────────────
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFixedHeight(18)
+        self.progress_bar.setObjectName("UpdateProgressBar")
+        self.progress_bar.hide()
+        lay.addWidget(self.progress_bar)
+
+        self.lbl_download = QLabel("")
+        self.lbl_download.setStyleSheet("color:#a6e3a1;font-size:11px;")
+        self.lbl_download.hide()
+        lay.addWidget(self.lbl_download)
+
+        # ── 버튼 행 ────────────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_gh = QPushButton("🌐 GitHub 릴리즈 페이지")
+        btn_gh.setObjectName("SecondaryBtn")
+        btn_gh.setFixedHeight(34)
+        btn_gh.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl("https://github.com/Hyunjun15/calendar-todo-widget/releases")
+        ))
+        btn_row.addWidget(btn_gh)
+        self.btn_download = QPushButton("⬇  다운로드")
+        self.btn_download.setObjectName("PrimaryBtn")
+        self.btn_download.setFixedHeight(34)
+        self.btn_download.setEnabled(False)
+        self.btn_download.clicked.connect(self._download_selected)
+        btn_row.addWidget(self.btn_download)
+        lay.addLayout(btn_row)
+
+        # ── 안내 문구 ───────────────────────────────────────────────────────
+        note = QLabel("💡 다운로드 후 압축 해제하여 main.py를 교체하거나 사용_안내.txt를 참고하세요.")
+        note.setStyleSheet("color:#6c7086;font-size:10px;")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+
+    def _fetch_releases(self):
+        """GitHub API로 모든 릴리즈 목록 가져오기"""
         try:
             import json as _json
-            url = "https://api.github.com/repos/Hyunjun15/calendar-todo-widget/releases/latest"
+            import ssl
+            ctx = ssl.create_default_context()
+            url = "https://api.github.com/repos/Hyunjun15/calendar-todo-widget/releases?per_page=30"
             req = urllib.request.Request(url, headers={"User-Agent": "CalendarTodoWidget"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = _json.loads(resp.read().decode())
-            latest_tag = data.get("tag_name", "")
-            release_url = data.get("html_url", "")
-            release_body = data.get("body", "")
-            if latest_tag and latest_tag != APP_VERSION:
-                self.lbl_update_status.setText(f"🆕 새 버전: {latest_tag}")
-                self.lbl_update_status.setStyleSheet("color:#a6e3a1;font-size:11px;font-weight:bold;")
-                notes_preview = release_body[:200].replace("\r\n", "\n") if release_body else ""
-                msg = (
-                    f"새 버전이 있습니다!\n\n"
-                    f"현재: {APP_VERSION}  →  최신: {latest_tag}\n\n"
-                    + (f"변경 내용:\n{notes_preview}\n\n" if notes_preview else "")
-                    + f"GitHub 릴리즈 페이지를 열겠습니까?\n{release_url}"
-                )
-                r = QMessageBox.information(
-                    self, "업데이트 가능", msg,
-                    QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Open,
-                )
-                if r == QMessageBox.StandardButton.Open and release_url:
-                    QDesktopServices.openUrl(QUrl(release_url))
-            else:
-                self.lbl_update_status.setText(f"✅ 최신 버전 ({APP_VERSION})")
-                self.lbl_update_status.setStyleSheet("color:#6c7086;font-size:11px;")
-                QMessageBox.information(
-                    self, "최신 버전",
-                    f"현재 최신 버전입니다 ({APP_VERSION}).",
-                    QMessageBox.StandardButton.Ok,
-                )
-        except Exception as e:
-            self.lbl_update_status.setText("⚠ 연결 실패")
-            self.lbl_update_status.setStyleSheet("color:#f38ba8;font-size:11px;")
-            QMessageBox.warning(
-                self, "연결 실패",
-                f"GitHub에 연결할 수 없습니다.\n\n{e}\n\n인터넷 연결을 확인하세요.",
-                QMessageBox.StandardButton.Ok,
-            )
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                self._releases = _json.loads(resp.read().decode())
+            self._populate_list()
+        except Exception as ex:
+            self.lbl_status.setText(f"⚠ 연결 실패: {ex}")
+            self.lbl_status.setStyleSheet("color:#f38ba8;font-size:12px;")
+
+    def _populate_list(self):
+        """릴리즈 목록을 QListWidget에 채우기"""
+        self.list_versions.clear()
+        if not self._releases:
+            self.lbl_status.setText("릴리즈 정보를 찾을 수 없습니다.")
+            return
+        for rel in self._releases:
+            tag = rel.get("tag_name", "")
+            name = rel.get("name", tag)
+            published = rel.get("published_at", "")[:10]
+            is_current = (tag == APP_VERSION)
+            is_latest = (rel == self._releases[0])
+            label = name
+            if is_current:
+                label = f"✅ {name}  (현재)"
+            elif is_latest:
+                label = f"🆕 {name}  (최신)"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, rel)
+            if is_current:
+                item.setForeground(QColor("#a6e3a1"))
+            elif is_latest:
+                item.setForeground(QColor("#89b4fa"))
+            self.list_versions.addItem(item)
+        self.lbl_status.setText(f"총 {len(self._releases)}개 버전 — 버전을 선택하세요")
+        self.lbl_status.setStyleSheet("color:#a6adc8;font-size:12px;")
+        # 최신 버전 또는 현재 버전 자동 선택
+        self.list_versions.setCurrentRow(0)
+
+    def _on_version_selected(self, row: int):
+        if row < 0 or row >= len(self._releases):
+            self.btn_download.setEnabled(False)
+            return
+        rel = self._releases[row]
+        body = rel.get("body", "") or "(변경 내역 없음)"
+        self.txt_notes.setPlainText(body)
+        tag = rel.get("tag_name", "")
+        is_current = (tag == APP_VERSION)
+        self.btn_download.setEnabled(not is_current)
+        if is_current:
+            self.btn_download.setText("현재 버전")
+        else:
+            self.btn_download.setText(f"⬇  {tag} 다운로드")
+
+    def _download_selected(self):
+        row = self.list_versions.currentRow()
+        if row < 0 or row >= len(self._releases):
+            return
+        rel = self._releases[row]
+        tag = rel.get("tag_name", "")
+        if not tag:
+            return
+
+        # 다운로드 URL (소스 zip)
+        zip_url = f"https://github.com/Hyunjun15/calendar-todo-widget/archive/refs/tags/{tag}.zip"
+        downloads_dir = Path.home() / "Downloads"
+        downloads_dir.mkdir(exist_ok=True)
+        save_path = downloads_dir / f"calendar-todo-widget-{tag}.zip"
+
+        # 이미 존재하면 확인
+        if save_path.exists():
+            r = QMessageBox.question(self, "파일 존재",
+                f"이미 다운로드된 파일이 있습니다:\n{save_path}\n\n덮어쓰시겠습니까?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if r != QMessageBox.StandardButton.Yes:
+                return
+
+        self.btn_download.setEnabled(False)
+        self.progress_bar.show()
+        self.progress_bar.setValue(0)
+        self.lbl_download.hide()
+
+        try:
+            import ssl, json as _json
+            ctx = ssl.create_default_context()
+            req = urllib.request.Request(zip_url, headers={"User-Agent": "CalendarTodoWidget"})
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                chunk = 8192
+                with open(save_path, "wb") as f:
+                    while True:
+                        buf = resp.read(chunk)
+                        if not buf:
+                            break
+                        f.write(buf)
+                        downloaded += len(buf)
+                        if total > 0:
+                            pct = int(downloaded * 100 / total)
+                            self.progress_bar.setValue(pct)
+                            QApplication.processEvents()
+            self.progress_bar.setValue(100)
+            self.lbl_download.setText(f"✅ 저장 완료: {save_path}")
+            self.lbl_download.show()
+            r2 = QMessageBox.information(self, "다운로드 완료",
+                f"버전 {tag} 다운로드 완료!\n\n저장 위치:\n{save_path}\n\n"
+                "압축을 해제하고 main.py와 assets/ 폴더를 현재 폴더에 교체한 후\n"
+                "앱을 재시작하세요.",
+                QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ok,
+                QMessageBox.StandardButton.Open)
+            if r2 == QMessageBox.StandardButton.Open:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(downloads_dir)))
+        except Exception as ex:
+            self.progress_bar.hide()
+            QMessageBox.warning(self, "다운로드 실패",
+                f"다운로드 중 오류가 발생했습니다:\n\n{ex}",
+                QMessageBox.StandardButton.Ok)
         finally:
-            self.btn_check_update.setEnabled(True)
-            self.btn_check_update.setText("⬆  업데이트 확인")
+            self.btn_download.setEnabled(True)
+            tag2 = rel.get("tag_name", "")
+            is_current2 = (tag2 == APP_VERSION)
+            if is_current2:
+                self.btn_download.setText("현재 버전")
+            else:
+                self.btn_download.setText(f"⬇  {tag2} 다운로드")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7293,6 +7629,28 @@ class MainWindow(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 EXTRA_QSS = """
+/* ── 파일 드롭 영역 ─────────────────────────────────────── */
+QFrame#FileDropArea {
+    border: 2px dashed #45475a;
+    border-radius: 10px;
+    background: #181825;
+    min-height: 90px;
+}
+
+/* ── 업데이트 진행 바 ─────────────────────────────────────── */
+QProgressBar#UpdateProgressBar {
+    background: #27273a;
+    border-radius: 4px;
+    border: 1px solid #45475a;
+    text-align: center;
+    color: #cdd6f4;
+    font-size: 10px;
+}
+QProgressBar#UpdateProgressBar::chunk {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #89b4fa,stop:1 #a6e3a1);
+    border-radius: 4px;
+}
+
 /* ── 툴팁 ───────────────────────────────────────────────── */
 QToolTip {
     background-color: #27273a;
