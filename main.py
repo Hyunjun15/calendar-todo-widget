@@ -4339,7 +4339,10 @@ class _CompletedItem(QFrame):
                 pass
 
         # 상세 보기 버튼 (내용·파일이 있을 때만)
-        _has_detail = bool(r.get("description") or r.get("goal") or r.get("file_path"))
+        _desc = r["description"] or ""
+        _goal = r["goal"] or ""
+        _fpath = r["file_path"] or ""
+        _has_detail = bool(_desc or _goal or _fpath)
         if _has_detail:
             self._btn_detail = QPushButton("▸")
             self._btn_detail.setObjectName("SectionCollapseBtn")
@@ -4373,18 +4376,18 @@ class _CompletedItem(QFrame):
             )
             dl = QVBoxLayout(self._detail_w)
             dl.setContentsMargins(8, 4, 8, 4); dl.setSpacing(3)
-            if r.get("goal"):
-                g = QLabel(f"🎯 {r['goal']}")
+            if _goal:
+                g = QLabel(f"🎯 {_goal}")
                 g.setStyleSheet("color:#a6adc8;font-size:11px;background:transparent;")
                 g.setWordWrap(True)
                 dl.addWidget(g)
-            if r.get("description"):
-                d = QLabel(r["description"])
+            if _desc:
+                d = QLabel(_desc)
                 d.setStyleSheet("color:#a6adc8;font-size:11px;background:transparent;")
                 d.setWordWrap(True)
                 dl.addWidget(d)
-            if r.get("file_path"):
-                fp = r["file_path"]
+            if _fpath:
+                fp = _fpath
                 f_lbl = QLabel(f"📎 {fp}")
                 f_lbl.setStyleSheet(
                     "color:#89b4fa;font-size:10px;background:transparent;"
