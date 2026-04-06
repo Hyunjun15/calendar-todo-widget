@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.16"
+APP_VERSION      = "v3.17"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -974,6 +974,10 @@ class Database:
         return self.conn.execute(
             "SELECT * FROM schedules ORDER BY event_date ASC"
         ).fetchall()
+
+    def get_schedule_by_id(self, sched_id) -> sqlite3.Row:
+        cur = self.conn.execute("SELECT * FROM schedules WHERE id=?", (sched_id,))
+        return cur.fetchone()
 
     def get_schedules_for_date(self, date_str: str) -> list:
         """단일 날짜에 해당하는 일정 반환 (범위 포함)"""
@@ -2210,6 +2214,7 @@ class TaskItemWidget(QFrame):
         btn_del = QPushButton("✕")
         btn_del.setObjectName("TaskDeleteBtn")
         btn_del.setFixedSize(24, 24)
+        btn_del.setToolTip("삭제")
         btn_del.clicked.connect(lambda: self.delete_requested.emit(self._id))
         inner.addWidget(btn_del, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -2516,8 +2521,8 @@ class ScheduleDialog(_MovableDialog):
             btn.setFixedHeight(32)
             clr = SCHED_COLORS[etype]
             btn.setStyleSheet(
-                f"QPushButton{{background:#252535;border:2px solid #3d3d58;border-radius:8px;"
-                f"color:#7f849c;font-size:12px;padding:0 8px;}}"
+                f"QPushButton{{background:transparent;border:2px solid #45475a;border-radius:8px;"
+                f"color:palette(text);font-size:12px;padding:0 8px;}}"
                 f"QPushButton:checked{{background:rgba({self._hex_to_rgb(clr)},0.15);"
                 f"border:2px solid {clr};color:{clr};font-weight:bold;}}"
                 f"QPushButton:hover{{border-color:{clr};color:{clr};}}"
@@ -2671,7 +2676,13 @@ class TaskDialog(_MovableDialog):
         lay.setContentsMargins(24, 20, 24, 20)
         lay.setSpacing(12)
 
-        t = QLabel("할 일 편집" if self._is_edit else "✨ 새 할 일 추가")
+        _add_titles = {
+            TASK_TODO:     "✨ 새 할 일 추가",
+            TASK_URGENT:   "🚨 새 긴급업무 추가",
+            TASK_PERSONAL: "👤 새 개인업무 추가",
+            TASK_MISC:     "📌 새 기타 항목 추가",
+        }
+        t = QLabel("할 일 편집" if self._is_edit else _add_titles.get(self._task_type, "✨ 새 항목 추가"))
         t.setObjectName("DialogTitle")
         t.setFont(QFont("맑은 고딕", 14, QFont.Weight.Bold))
         lay.addWidget(t)
@@ -4973,6 +4984,30 @@ class ScheduleSection(QWidget):
                 w.delete_requested.connect(self._delete)
                 self.items_lay.addWidget(w)
 
+    def set_filter(self, query: str) -> int:
+        """검색어로 일정 필터링. 표시된 항목 수 반환."""
+        shown = 0
+        for i in range(self.items_lay.count()):
+            item = self.items_lay.itemAt(i)
+            if item and item.widget():
+                w = item.widget()
+                if query:
+                    sched = self.db.get_schedule_by_id(w._id)
+                    if sched:
+                        match = any(
+                            query in (sched[f] or "").lower()
+                            for f in ("name", "location", "content")
+                        )
+                        w.setVisible(match)
+                        if match:
+                            shown += 1
+                    else:
+                        w.setVisible(False)
+                else:
+                    w.setVisible(True)
+                    shown += 1
+        return shown
+
     def _add(self, default_type: str = SCHED_SINGLE, preset_date: date = None):
         dlg = ScheduleDialog(self, preset_date=preset_date)
         # preset type
@@ -5659,6 +5694,22 @@ class OptionsDialog(_MovableDialog):
         lay.addLayout(themes_row1)
         lay.addLayout(themes_row2)
 
+        lay.addSpacing(16)
+        sep_up = QFrame(); sep_up.setFrameShape(QFrame.Shape.HLine)
+        sep_up.setMaximumHeight(1); lay.addWidget(sep_up)
+        lay.addSpacing(8)
+        lay.addWidget(self._lbl("앱 업데이트"))
+        up_row = QHBoxLayout(); up_row.setSpacing(8)
+        self.btn_check_update = QPushButton("⬆  업데이트 확인")
+        self.btn_check_update.setObjectName("SecondaryBtn")
+        self.btn_check_update.setFixedHeight(34)
+        self.btn_check_update.clicked.connect(self._check_github_version)
+        up_row.addWidget(self.btn_check_update)
+        self.lbl_update_status = QLabel(f"현재: {APP_VERSION}")
+        self.lbl_update_status.setStyleSheet("color:#6c7086;font-size:11px;")
+        up_row.addWidget(self.lbl_update_status, 1)
+        lay.addLayout(up_row)
+
         lay.addStretch()
         self.tabs.addTab(w, "🎨  테마 & 화면")
 
@@ -5715,22 +5766,6 @@ class OptionsDialog(_MovableDialog):
         btn_feedback.setFixedHeight(34)
         btn_feedback.clicked.connect(self._send_feedback)
         lay.addWidget(btn_feedback)
-
-        lay.addSpacing(16)
-        sep_up = QFrame(); sep_up.setFrameShape(QFrame.Shape.HLine)
-        sep_up.setMaximumHeight(1); lay.addWidget(sep_up)
-        lay.addSpacing(8)
-        lay.addWidget(self._lbl("앱 업데이트"))
-        up_row = QHBoxLayout(); up_row.setSpacing(8)
-        self.btn_check_update = QPushButton("⬆  업데이트 확인")
-        self.btn_check_update.setObjectName("SecondaryBtn")
-        self.btn_check_update.setFixedHeight(34)
-        self.btn_check_update.clicked.connect(self._check_github_version)
-        up_row.addWidget(self.btn_check_update)
-        self.lbl_update_status = QLabel(f"현재: {APP_VERSION}")
-        self.lbl_update_status.setStyleSheet("color:#6c7086;font-size:11px;")
-        up_row.addWidget(self.lbl_update_status, 1)
-        lay.addLayout(up_row)
 
         lay.addStretch()
         self.tabs.addTab(w, "📋  섹션 설정")
@@ -6587,7 +6622,7 @@ class MainWindow(QWidget):
         lay.addWidget(icon_lbl)
 
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("할 일·긴급·개인업무 검색... (Esc: 닫기)")
+        self._search_edit.setPlaceholderText("할 일·긴급·개인업무·일정 검색... (Esc: 닫기)")
         self._search_edit.setObjectName("SearchEdit")
         self._search_edit.textChanged.connect(self._on_search)
         lay.addWidget(self._search_edit, 1)
@@ -6629,6 +6664,7 @@ class MainWindow(QWidget):
         total = 0
         for sec in (self.sec_todo, self.sec_urgent, self.sec_personal):
             total += sec.set_filter(q)
+        total += self.sec_schedule.set_filter(q)
         self._search_count.setText(f"{total}개 결과" if q else "")
 
     def _scroll_to_task(self, task_id: int):
