@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.8"
+APP_VERSION      = "v3.9"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -3516,7 +3516,7 @@ class LogDialog(_MovableDialog):
             emp = QLabel("아직 메모가 없습니다.")
             emp.setObjectName("TaskInfoDesc")
             emp.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            emp.setStyleSheet("color:#45475a;padding:20px 0;")
+            emp.setStyleSheet("color:#6c7086;padding:20px 0;")
             self.log_lay.insertWidget(0, emp)
         else:
             for i, lg in enumerate(logs):
@@ -3660,7 +3660,7 @@ class LogDialog(_MovableDialog):
 
         if not entries:
             emp_lbl = QLabel("항목이 없습니다. 아래에서 추가하세요.")
-            emp_lbl.setStyleSheet("color:#45475a;font-size:10px;padding:2px 4px;")
+            emp_lbl.setStyleSheet("color:#6c7086;font-size:10px;padding:2px 4px;")
             cl.addWidget(emp_lbl)
 
         # ── 새 항목 추가 행 ──────────────────────────────────────────────
@@ -4631,6 +4631,12 @@ class MiscSection(QWidget):
         self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
         self.empty_lbl.hide()
         b_lay.addWidget(self.empty_lbl)
+        btn_add = QPushButton("＋  기타 항목 추가")
+        btn_add.setObjectName("AddTaskBtn")
+        btn_add.setMinimumHeight(34)
+        btn_add.setToolTip("새 기타 항목 추가")
+        btn_add.clicked.connect(self._add)
+        b_lay.addWidget(btn_add)
         lay.addWidget(self.body)
 
     def refresh(self):
@@ -4648,6 +4654,14 @@ class MiscSection(QWidget):
                 w.delete_requested.connect(self._delete)
                 w.edit_requested.connect(self._edit)
                 self.items_lay.addWidget(w)
+
+    def _add(self):
+        dlg = TaskDialog(self, task_type=TASK_MISC)
+        if dlg.exec():
+            v = dlg.values()
+            self.db.add_task(TASK_MISC, v["title"], v["description"],
+                             v["goal"], v["priority"], file_path=v["file_path"])
+            self.refresh()
 
     def _edit(self, tid):
         t = self.db.get_task(tid)
@@ -5922,7 +5936,7 @@ class JsonBackupDialog(_MovableDialog):
         lay.setSpacing(12)
 
         info = QLabel(
-            "모든 태스크, 로그, 진행 그룹, 일정 데이터를\n"
+            "모든 할 일, 로그, 진행 그룹, 일정 데이터를\n"
             "JSON 파일로 내보냅니다."
         )
         info.setObjectName("TaskInfoDesc")
@@ -5930,7 +5944,7 @@ class JsonBackupDialog(_MovableDialog):
         lay.addWidget(info)
 
         # 내보낼 항목 선택
-        self.chk_exp_tasks = QCheckBox("태스크 + 로그 + 진행 그룹")
+        self.chk_exp_tasks = QCheckBox("할 일 + 로그 + 진행 그룹")
         self.chk_exp_tasks.setObjectName("TaskCheck")
         self.chk_exp_tasks.setChecked(True)
         lay.addWidget(self.chk_exp_tasks)
