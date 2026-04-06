@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.13"
+APP_VERSION      = "v3.14"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -2331,6 +2331,7 @@ class MiscItemWidget(QFrame):
             btn_del = QPushButton("✕")
             btn_del.setObjectName("TaskDeleteBtn")
             btn_del.setFixedSize(22, 22)
+            btn_del.setToolTip("삭제")
             btn_del.clicked.connect(lambda: self.delete_requested.emit(self._id))
             hdr.addWidget(btn_del)
         lay.addLayout(hdr)
@@ -4564,11 +4565,12 @@ class CompletedSection(QWidget):
         title_row = QHBoxLayout()
         tl = QLabel("✅  완료업무"); tl.setObjectName("SectionTitle")
         tl.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
+        tl.setToolTip("펼치면 완료업무 검색 가능 (제목·내용·목표)")
         title_row.addWidget(tl); title_row.addStretch()
         self.lbl_count = QLabel("0건"); self.lbl_count.setObjectName("SectionStats")
         title_row.addWidget(self.lbl_count)
         self.btn_col = QPushButton("▶"); self.btn_col.setObjectName("SectionCollapseBtn")
-        self.btn_col.setFixedSize(26, 26); self.btn_col.setToolTip("섹션 접기/펼치기")
+        self.btn_col.setFixedSize(26, 26); self.btn_col.setToolTip("섹션 접기/펼치기 — 완료업무 검색창 포함")
         self.btn_col.clicked.connect(self._toggle)
         title_row.addWidget(self.btn_col)
         hdr_l.addLayout(title_row)
@@ -4762,8 +4764,8 @@ class MiscSection(QWidget):
         dlg = TaskDialog(self, task_type=TASK_MISC)
         if dlg.exec():
             v = dlg.values()
-            self.db.add_task(TASK_MISC, v["title"], v["description"],
-                             v["goal"], v["priority"], file_path=v["file_path"])
+            self.db.add_task(v["title"], v["description"], v["goal"],
+                             TASK_MISC, v["priority"], file_path=v.get("file_path"))
             self.refresh()
 
     def _edit(self, tid):
@@ -5737,19 +5739,14 @@ class OptionsDialog(_MovableDialog):
 
         lay.addSpacing(4)
         lay.addWidget(self._lbl("자동 시작"))
-        self.chk_autostart = QCheckBox("Windows 로그인 시 자동 시작")
-        self.chk_autostart.setObjectName("TaskCheck")
-        self.chk_autostart.setChecked(True)
-        lay.addWidget(self.chk_autostart)
-
-        note = QLabel(
-            "자동 시작은 Windows 작업 스케줄러 'CalendarTodoList' 태스크로 설정됩니다.\n"
-            "변경 시 작업 스케줄러에서 직접 활성/비활성화하세요."
+        note_autostart = QLabel(
+            "자동 시작은 Windows 작업 스케줄러 'CalendarTodoList' 태스크로 관리됩니다.\n"
+            "활성/비활성화는 작업 스케줄러에서 직접 변경하세요."
         )
-        note.setObjectName("TaskInfoDesc")
-        note.setWordWrap(True)
-        note.setStyleSheet("color:#6c7086;font-size:11px;padding-top:4px;")
-        lay.addWidget(note)
+        note_autostart.setObjectName("TaskInfoDesc")
+        note_autostart.setWordWrap(True)
+        note_autostart.setStyleSheet("color:#6c7086;font-size:11px;padding-top:4px;")
+        lay.addWidget(note_autostart)
 
         lay.addStretch()
         self.tabs.addTab(w, "🔔  알림")
