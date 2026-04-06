@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.17"
+APP_VERSION      = "v3.18"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -431,6 +431,7 @@ QLabel#MiscContent, QLabel#LogTimestamp {{ font-size: {fs_s}pt; }}
 QPushButton#RefreshBtn {{ font-size: {fs_s}pt; }}
 QLineEdit, QTextEdit, QPlainTextEdit {{ font-size: {fs}pt; }}
 QComboBox, QSpinBox, QDateEdit {{ font-size: {fs}pt; }}
+QComboBox#SortCombo {{ font-size: 12px; padding: 2px 8px; }}
 """
 
 
@@ -2848,12 +2849,17 @@ class TaskDialog(_MovableDialog):
         self.ed_title.setFocus()
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "모든 파일 (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "파일 선택", "", "모든 파일 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if path:
             self.ed_fpath.setText(path)
 
     def _browse_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "폴더 선택")
+        path = QFileDialog.getExistingDirectory(
+            self, "폴더 선택", options=QFileDialog.Option.DontUseNativeDialog
+        )
         if path:
             self.ed_fpath.setText(path)
 
@@ -2869,7 +2875,10 @@ class TaskDialog(_MovableDialog):
                 self._add_file_row(path, is_existing=False, file_id=None)
 
     def _add_file(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "파일 선택 (Ctrl+클릭으로 여러 개)", "", "모든 파일 (*.*)")
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "파일 선택 (Ctrl+클릭으로 여러 개)", "", "모든 파일 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         for path in paths:
             if path and path not in self._pending_files:
                 self._pending_files.append(path)
@@ -3121,7 +3130,10 @@ class LogItemWidget(QFrame):
         self.edit_btns.setVisible(False)
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "모든 파일 (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "파일 선택", "", "모든 파일 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if path:
             self.ed_file_path.setText(path)
 
@@ -3742,7 +3754,10 @@ class LogDialog(_MovableDialog):
         # ProgressEntryRow 가 자체 라벨을 즉시 업데이트하므로 reload 불필요
 
     def _browse_attach(self):
-        path, _ = QFileDialog.getOpenFileName(self, "파일 선택", "", "모든 파일 (*.*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "파일 선택", "", "모든 파일 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
         if path:
             self._log_attach_path = path
             self.lbl_attach.setText(f"📎 {Path(path).name}")
