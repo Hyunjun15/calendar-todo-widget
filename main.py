@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.12"
+APP_VERSION      = "v3.13"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -3810,7 +3810,7 @@ class TaskSection(QWidget):
         title_row.addWidget(lbl_sort)
         self.cb_sort = QComboBox()
         self.cb_sort.setFixedHeight(24)
-        self.cb_sort.setFixedWidth(90)
+        self.cb_sort.setFixedWidth(108)
         self.cb_sort.setObjectName("SortCombo")
         self.cb_sort.addItem("기본", "default")
         self.cb_sort.addItem("마감일↑", "due_asc")
@@ -4299,14 +4299,18 @@ class _CompletedItem(QFrame):
     def __init__(self, task_row, parent=None):
         super().__init__(parent)
         self._id = task_row["id"]
+        self._detail_visible = False
         self.setObjectName("TaskItemCompleted")
         self.setMinimumHeight(38)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._build(task_row)
 
     def _build(self, r):
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 4, 8, 4); lay.setSpacing(8)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 4, 8, 4); outer.setSpacing(0)
+
+        # ── 메인 행 ──────────────────────────────────────────────────────────
+        lay = QHBoxLayout(); lay.setSpacing(8)
 
         # 타입 뱃지
         badge_color = "#89b4fa" if r["task_type"] == TASK_TODO else "#f38ba8"
@@ -4334,6 +4338,16 @@ class _CompletedItem(QFrame):
             except Exception:
                 pass
 
+        # 상세 보기 버튼 (내용·파일이 있을 때만)
+        _has_detail = bool(r.get("description") or r.get("goal") or r.get("file_path"))
+        if _has_detail:
+            self._btn_detail = QPushButton("▸")
+            self._btn_detail.setObjectName("SectionCollapseBtn")
+            self._btn_detail.setFixedSize(22, 22)
+            self._btn_detail.setToolTip("상세 내용 보기/접기")
+            self._btn_detail.clicked.connect(self._toggle_detail)
+            lay.addWidget(self._btn_detail)
+
         btn_r = QPushButton("↩")
         btn_r.setObjectName("SecondaryBtn")
         btn_r.setFixedSize(26, 26)
@@ -4344,8 +4358,50 @@ class _CompletedItem(QFrame):
         btn_d = QPushButton("✕")
         btn_d.setObjectName("TaskDeleteBtn")
         btn_d.setFixedSize(26, 26)
+        btn_d.setToolTip("삭제")
         btn_d.clicked.connect(lambda: self.delete_requested.emit(self._id))
         lay.addWidget(btn_d)
+
+        outer.addLayout(lay)
+
+        # ── 상세 영역 (기본 숨김) ─────────────────────────────────────────────
+        if _has_detail:
+            self._detail_w = QWidget()
+            self._detail_w.setStyleSheet(
+                "QWidget{background:#1a1a2e;border-radius:6px;"
+                "border-left:2px solid #45475a;margin:2px 0 2px 20px;padding:4px 8px;}"
+            )
+            dl = QVBoxLayout(self._detail_w)
+            dl.setContentsMargins(8, 4, 8, 4); dl.setSpacing(3)
+            if r.get("goal"):
+                g = QLabel(f"🎯 {r['goal']}")
+                g.setStyleSheet("color:#a6adc8;font-size:11px;background:transparent;")
+                g.setWordWrap(True)
+                dl.addWidget(g)
+            if r.get("description"):
+                d = QLabel(r["description"])
+                d.setStyleSheet("color:#a6adc8;font-size:11px;background:transparent;")
+                d.setWordWrap(True)
+                dl.addWidget(d)
+            if r.get("file_path"):
+                fp = r["file_path"]
+                f_lbl = QLabel(f"📎 {fp}")
+                f_lbl.setStyleSheet(
+                    "color:#89b4fa;font-size:10px;background:transparent;"
+                    "text-decoration:underline;"
+                )
+                f_lbl.setWordWrap(True)
+                f_lbl.setToolTip(fp)
+                f_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+                f_lbl.mousePressEvent = lambda _e, p=fp: open_file_path(p, self)
+                dl.addWidget(f_lbl)
+            self._detail_w.hide()
+            outer.addWidget(self._detail_w)
+
+    def _toggle_detail(self):
+        self._detail_visible = not self._detail_visible
+        self._detail_w.setVisible(self._detail_visible)
+        self._btn_detail.setText("▾" if self._detail_visible else "▸")
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
@@ -4524,6 +4580,15 @@ class CompletedSection(QWidget):
 
         b_lay = QVBoxLayout(self.body)
         b_lay.setContentsMargins(8, 6, 8, 8); b_lay.setSpacing(6)
+
+        # 검색바
+        self.ed_search = QLineEdit()
+        self.ed_search.setPlaceholderText("🔍  완료업무 검색... (Esc: 초기화)")
+        self.ed_search.setObjectName("SearchBar")
+        self.ed_search.textChanged.connect(self._search_filter)
+        self.ed_search.installEventFilter(self)
+        b_lay.addWidget(self.ed_search)
+
         self.items_lay = QVBoxLayout()
         self.items_lay.setContentsMargins(0, 0, 0, 0); self.items_lay.setSpacing(4)
         b_lay.addLayout(self.items_lay)
@@ -4532,10 +4597,23 @@ class CompletedSection(QWidget):
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
         b_lay.addWidget(self.empty_lbl)
+        self.no_result_lbl = QLabel("검색 결과가 없습니다.")
+        self.no_result_lbl.setObjectName("TaskInfoDesc")
+        self.no_result_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.no_result_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
+        self.no_result_lbl.hide()
+        b_lay.addWidget(self.no_result_lbl)
         lay.addWidget(self.body)
         self.body.hide()
 
     def refresh(self):
+        q = self.ed_search.text().strip().lower() if hasattr(self, "ed_search") else ""
+        self._render(q)
+
+    def _search_filter(self, text: str):
+        self._render(text.strip().lower())
+
+    def _render(self, q: str = ""):
         while self.items_lay.count():
             item = self.items_lay.takeAt(0)
             if item.widget(): item.widget().deleteLater()
@@ -4546,9 +4624,20 @@ class CompletedSection(QWidget):
 
         if not tasks:
             self.empty_lbl.show()
+            self.no_result_lbl.hide()
             return
-
         self.empty_lbl.hide()
+
+        if q:
+            tasks = [t for t in tasks if
+                     q in (t["title"] or "").lower() or
+                     q in (t["description"] or "").lower() or
+                     q in (t["goal"] or "").lower()]
+
+        if not tasks:
+            self.no_result_lbl.show()
+            return
+        self.no_result_lbl.hide()
 
         # 연도별 그룹화 (최신 연도 먼저)
         by_year: dict[str, list] = {}
@@ -4562,6 +4651,12 @@ class CompletedSection(QWidget):
         for year in sorted(by_year.keys(), reverse=True):
             group = _YearGroup(year, by_year[year], self.db, parent=self.body)
             self.items_lay.addWidget(group)
+
+    def eventFilter(self, obj, event):
+        if obj is self.ed_search and event.type() == event.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self.ed_search.clear()
+        return super().eventFilter(obj, event)
 
     def _toggle(self):
         self._collapsed = not self._collapsed
@@ -6201,7 +6296,7 @@ class TitleBar(QWidget):
         lay.setContentsMargins(14, 0, 8, 0)
         lay.setSpacing(4)
 
-        nm = QLabel("📋  To do list & Calendar")
+        nm = QLabel("📋  ToDo & Calendar")
         nm.setObjectName("TitleLabel")
         nm.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
         nm.setToolTip(f"버전 {APP_VERSION}  ({APP_VERSION_DATE})")
@@ -6211,7 +6306,7 @@ class TitleBar(QWidget):
         ver_lbl = QLabel(APP_VERSION)
         ver_lbl.setObjectName("VersionLabel")
         ver_lbl.setToolTip(f"업데이트: {APP_VERSION_DATE}")
-        ver_lbl.setFixedWidth(46)
+        ver_lbl.setMinimumWidth(56)
         lay.addWidget(ver_lbl)
 
         self.btn_backup = QPushButton("💾")
