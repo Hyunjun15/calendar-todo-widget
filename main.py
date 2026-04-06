@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.14"
+APP_VERSION      = "v3.15"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -5185,7 +5185,7 @@ class CoworkTodaySection(QWidget):
 # 13-C. EXPORT DIALOG (업무 보고용 내보내기)
 # ═══════════════════════════════════════════════════════════════════════════
 
-class ExportDialog(QDialog):
+class ExportDialog(_MovableDialog):
     """과제/할 일/긴급 업무/출장·교육 일정을 보고 양식으로 내보내기"""
 
     def __init__(self, db: Database, settings: QSettings, parent=None):
@@ -5193,9 +5193,7 @@ class ExportDialog(QDialog):
         self.db       = db
         self.settings = settings
         self._items: list[dict] = []
-        # FramelessWindowHint 제거 → OS 기본 테두리로 크기 조절 가능
-        self.setWindowFlags(Qt.WindowType.Dialog)
-        self.setWindowTitle("업무 내보내기 (보고용)")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
         self.setMinimumWidth(640)
         self.setMinimumHeight(480)
@@ -6019,6 +6017,7 @@ class JsonBackupDialog(_MovableDialog):
         lay.addWidget(title)
 
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("OptionsTab")
         lay.addWidget(self.tabs)
 
         self._build_export_tab()
@@ -7175,6 +7174,26 @@ class MainWindow(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 
 EXTRA_QSS = """
+/* ── 툴팁 ───────────────────────────────────────────────── */
+QToolTip {
+    background-color: #27273a;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+/* ── 정렬 드롭다운 (작은 높이에 맞게 padding 축소) ─────── */
+QComboBox#SortCombo {
+    background: #27273a;
+    border: 1px solid #3d3d58;
+    border-radius: 6px;
+    padding: 2px 8px;
+    color: #cdd6f4;
+    font-size: 12px;
+}
+
 QLabel#TaskGoal { font-size: 11px; color: #cdd6f4; font-style: italic; }
 QLabel#SourceBadge { font-size: 10px; color: #45475a; background: #22223a; border-radius: 3px; padding: 0 4px; }
 

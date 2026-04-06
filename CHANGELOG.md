@@ -2,6 +2,16 @@
 
 ---
 
+## v3.15 — 2026-04-06
+
+### UI 버그 수정
+- **백업 탭 흰 배경+흰 글씨**: `JsonBackupDialog` QTabWidget에 `setObjectName("OptionsTab")` 추가 → 다크 탭 스타일 적용
+- **내보내기 창 OS 타이틀바**: `ExportDialog` `QDialog` → `_MovableDialog` 변경, `FramelessWindowHint` 적용 — 다른 다이얼로그와 일관성
+- **툴팁 OS 기본 흰 배경**: EXTRA_QSS에 `QToolTip` 다크 스타일 추가 (#27273a 배경, #cdd6f4 글씨)
+- **정렬 드롭다운 padding**: `SortCombo` 전용 QSS 추가 (24px 고정 높이에 맞게 padding 축소)
+
+---
+
 ## v3.14 — 2026-04-06
 
 ### UX 개선 (dev-fix)
