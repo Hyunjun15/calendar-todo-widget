@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.6"
+APP_VERSION      = "v3.7"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -2116,6 +2116,8 @@ class TaskItemWidget(QFrame):
         self.chk.setObjectName("TaskCheck")
         self.chk.setChecked(self._completed)
         self.chk.setFixedSize(22, 22)
+        if self._completed:
+            self.chk.setToolTip("우클릭 → 미완료로 전환")
         self.chk.toggled.connect(lambda v: self.toggled.emit(self._id, v))
         inner.addWidget(self.chk, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -2200,7 +2202,7 @@ class TaskItemWidget(QFrame):
         btn_edit = QPushButton("✎")
         btn_edit.setObjectName("TaskEditBtn")
         btn_edit.setFixedSize(24, 24)
-        btn_edit.setToolTip("편집")
+        btn_edit.setToolTip("편집 (더블클릭으로도 가능)")
         btn_edit.clicked.connect(lambda: self.edit_requested.emit(self._id))
         inner.addWidget(btn_edit, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -3800,6 +3802,8 @@ class TaskSection(QWidget):
         title_row = QHBoxLayout()
         tl = QLabel(self.title_str); tl.setObjectName("SectionTitle")
         tl.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
+        if self.task_type == TASK_URGENT:
+            tl.setToolTip("이번 주 처리해야 하는 단기 업무.\n과제/할 일(장기 관리)과 구분해서 사용하세요.")
         title_row.addWidget(tl); title_row.addStretch()
         self.cb_sort = QComboBox()
         self.cb_sort.setFixedHeight(24)
@@ -4500,7 +4504,8 @@ class CompletedSection(QWidget):
         self.lbl_count = QLabel("0건"); self.lbl_count.setObjectName("SectionStats")
         title_row.addWidget(self.lbl_count)
         self.btn_col = QPushButton("▶"); self.btn_col.setObjectName("SectionCollapseBtn")
-        self.btn_col.setFixedSize(26, 26); self.btn_col.clicked.connect(self._toggle)
+        self.btn_col.setFixedSize(26, 26); self.btn_col.setToolTip("섹션 접기/펼치기")
+        self.btn_col.clicked.connect(self._toggle)
         title_row.addWidget(self.btn_col)
         hdr_l.addLayout(title_row)
         lay.addWidget(hdr_w)
@@ -4608,7 +4613,8 @@ class MiscSection(QWidget):
         self.lbl_cnt = QLabel("0개"); self.lbl_cnt.setObjectName("SectionStats")
         hdr_l.addWidget(self.lbl_cnt)
         btn_col = QPushButton("▼"); btn_col.setObjectName("SectionCollapseBtn")
-        btn_col.setFixedSize(26,26); btn_col.clicked.connect(self._toggle)
+        btn_col.setFixedSize(26,26); btn_col.setToolTip("섹션 접기/펼치기")
+        btn_col.clicked.connect(self._toggle)
         hdr_l.addWidget(btn_col)
         self.btn_col_ref = btn_col
         lay.addWidget(hdr_w)
@@ -4619,10 +4625,10 @@ class MiscSection(QWidget):
         self.items_lay = QVBoxLayout()
         self.items_lay.setContentsMargins(0,0,0,0); self.items_lay.setSpacing(6)
         b_lay.addLayout(self.items_lay)
-        self.empty_lbl = QLabel("기타 항목이 없습니다.\n(txt 파일의 [기타] 섹션에서 불러옵니다)")
+        self.empty_lbl = QLabel("기타 항목이 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#45475a;padding:14px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
         self.empty_lbl.hide()
         b_lay.addWidget(self.empty_lbl)
         lay.addWidget(self.body)
@@ -4711,6 +4717,7 @@ class ScheduleItemWidget(QFrame):
 
         btn_edit = QPushButton("✎"); btn_edit.setObjectName("LogEditBtn")
         btn_edit.setFixedSize(22, 22)
+        btn_edit.setToolTip("편집 (더블클릭으로도 가능)")
         btn_edit.clicked.connect(lambda: self.edit_requested.emit(self._id))
         name_row.addWidget(btn_edit)
 
@@ -4790,7 +4797,8 @@ class ScheduleSection(QWidget):
         hdr_l.addWidget(self.lbl_cnt)
 
         btn_col = QPushButton("▼"); btn_col.setObjectName("SectionCollapseBtn")
-        btn_col.setFixedSize(26, 26); btn_col.clicked.connect(self._toggle)
+        btn_col.setFixedSize(26, 26); btn_col.setToolTip("섹션 접기/펼치기")
+        btn_col.clicked.connect(self._toggle)
         hdr_l.addWidget(btn_col)
         self.btn_col_ref = btn_col
         lay.addWidget(hdr_w)
@@ -4807,7 +4815,7 @@ class ScheduleSection(QWidget):
         self.empty_lbl = QLabel("등록된 일정이 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#45475a;padding:12px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#6c7086;padding:12px 0;font-size:12px;")
         b_lay.addWidget(self.empty_lbl)
 
         # 추가 버튼 (단기일정 / 휴가 / 교육 통합)
