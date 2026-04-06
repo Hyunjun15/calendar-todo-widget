@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.18"
+APP_VERSION      = "v3.19"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -2809,7 +2809,7 @@ class TaskDialog(_MovableDialog):
 
             btn_add_file = QPushButton("📂  파일 선택 (여러 개 가능)")
             btn_add_file.setObjectName("SecondaryBtn")
-            btn_add_file.setFixedHeight(32)
+            btn_add_file.setFixedHeight(34)
             btn_add_file.clicked.connect(self._add_file)
             lay.addWidget(btn_add_file)
             self.ed_fpath = None
@@ -3089,12 +3089,12 @@ class LogItemWidget(QFrame):
         eb_lay.addStretch()
         btn_save = QPushButton("저장")
         btn_save.setObjectName("PrimaryBtn")
-        btn_save.setFixedHeight(28)
+        btn_save.setFixedHeight(32)
         btn_save.clicked.connect(self._save_edit)
         eb_lay.addWidget(btn_save)
         btn_cancel = QPushButton("취소")
         btn_cancel.setObjectName("SecondaryBtn")
-        btn_cancel.setFixedHeight(28)
+        btn_cancel.setFixedHeight(32)
         btn_cancel.clicked.connect(self._cancel_edit)
         eb_lay.addWidget(btn_cancel)
         self.edit_btns.setVisible(False)
@@ -3222,7 +3222,7 @@ class ProgressEntryRow(QWidget):
 
         self._btn_save = QPushButton("저장")
         self._btn_save.setObjectName("PrimaryBtn")
-        self._btn_save.setFixedHeight(32)
+        self._btn_save.setFixedHeight(34)
         self._btn_save.setFixedWidth(46)
         self._btn_save.setToolTip("저장 (Enter)")
         self._btn_save.clicked.connect(self._save)
@@ -3230,7 +3230,7 @@ class ProgressEntryRow(QWidget):
 
         self._btn_cancel = QPushButton("취소")
         self._btn_cancel.setObjectName("SecondaryBtn")
-        self._btn_cancel.setFixedHeight(32)
+        self._btn_cancel.setFixedHeight(34)
         self._btn_cancel.setFixedWidth(46)
         self._btn_cancel.setToolTip("취소")
         self._btn_cancel.clicked.connect(self._cancel)
@@ -3453,7 +3453,7 @@ class LogDialog(_MovableDialog):
         fa.addWidget(self.lbl_attach, 1)
         btn_attach = QPushButton("📂 첨부")
         btn_attach.setObjectName("SecondaryBtn")
-        btn_attach.setFixedHeight(26)
+        btn_attach.setFixedHeight(30)
         btn_attach.clicked.connect(self._browse_attach)
         fa.addWidget(btn_attach)
         btn_detach = QPushButton("✕")
@@ -3464,7 +3464,7 @@ class LogDialog(_MovableDialog):
 
         ba_g = QPushButton("메모 추가")
         ba_g.setObjectName("PrimaryBtn")
-        ba_g.setFixedHeight(26)
+        ba_g.setFixedHeight(30)
         ba_g.clicked.connect(self._add_general)
         fa.addWidget(ba_g)
         inp_lay.addLayout(fa)
@@ -3488,7 +3488,7 @@ class LogDialog(_MovableDialog):
         hdr_p.addStretch()
         btn_new_grp = QPushButton("＋ 새 그룹")
         btn_new_grp.setObjectName("PrimaryBtn")
-        btn_new_grp.setFixedHeight(28)
+        btn_new_grp.setFixedHeight(30)
         btn_new_grp.clicked.connect(self._add_progress_group)
         hdr_p.addWidget(btn_new_grp)
         pp_lay.addLayout(hdr_p)
@@ -3887,17 +3887,17 @@ class TaskSection(QWidget):
         bb_lay.addStretch()
         btn_ba_all = QPushButton("전체 선택")
         btn_ba_all.setObjectName("SecondaryBtn")
-        btn_ba_all.setFixedHeight(28)
+        btn_ba_all.setFixedHeight(30)
         btn_ba_all.clicked.connect(self._batch_select_all)
         bb_lay.addWidget(btn_ba_all)
         btn_ba_done = QPushButton("✅ 완료")
         btn_ba_done.setObjectName("PrimaryBtn")
-        btn_ba_done.setFixedHeight(28)
+        btn_ba_done.setFixedHeight(30)
         btn_ba_done.clicked.connect(self._batch_complete)
         bb_lay.addWidget(btn_ba_done)
         btn_ba_del = QPushButton("🗑 삭제")
         btn_ba_del.setObjectName("TaskDeleteBtn")
-        btn_ba_del.setFixedHeight(28)
+        btn_ba_del.setFixedHeight(30)
         btn_ba_del.clicked.connect(self._batch_delete)
         bb_lay.addWidget(btn_ba_del)
         b_lay.addWidget(self.batch_bar)
@@ -5282,7 +5282,7 @@ class ExportDialog(_MovableDialog):
         g_row.addWidget(self.ed_group, 1)
         btn_fill = QPushButton("전체 적용")
         btn_fill.setObjectName("SecondaryBtn")
-        btn_fill.setFixedHeight(28)
+        btn_fill.setFixedHeight(30)
         btn_fill.setToolTip("위 그룹사명을 모든 항목에 일괄 적용")
         btn_fill.clicked.connect(self._fill_all_groups)
         g_row.addWidget(btn_fill)
@@ -6222,12 +6222,12 @@ class JsonBackupDialog(_MovableDialog):
         imp_btns = QHBoxLayout()
         btn_all = QPushButton("전체 선택")
         btn_all.setObjectName("SecondaryBtn")
-        btn_all.setFixedHeight(28)
+        btn_all.setFixedHeight(30)
         btn_all.clicked.connect(lambda: [c.setChecked(True) for c in self._import_chks])
         imp_btns.addWidget(btn_all)
         btn_none = QPushButton("전체 해제")
         btn_none.setObjectName("SecondaryBtn")
-        btn_none.setFixedHeight(28)
+        btn_none.setFixedHeight(30)
         btn_none.clicked.connect(lambda: [c.setChecked(False) for c in self._import_chks])
         imp_btns.addWidget(btn_none)
         imp_btns.addStretch()

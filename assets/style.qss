@@ -438,7 +438,7 @@ QPushButton#PrimaryBtn {
     color: #1e1e2e;
     font-size: 13px;
     font-weight: bold;
-    padding: 9px 24px;
+    padding: 5px 20px;
 }
 QPushButton#PrimaryBtn:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -451,7 +451,7 @@ QPushButton#SecondaryBtn {
     border-radius: 9px;
     color: #a6adc8;
     font-size: 13px;
-    padding: 9px 22px;
+    padding: 5px 18px;
     border: 1px solid #3d3d58;
 }
 QPushButton#SecondaryBtn:hover { background: #313244; color: #cdd6f4; border-color: #585b70; }
@@ -462,7 +462,7 @@ QPushButton#DangerBtn {
     color: #f38ba8;
     font-size: 13px;
     font-weight: bold;
-    padding: 9px 18px;
+    padding: 5px 14px;
     border: 1px solid rgba(243,139,168,0.4);
 }
 QPushButton#DangerBtn:hover { background: rgba(243,139,168,0.30); }

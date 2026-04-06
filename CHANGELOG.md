@@ -2,6 +2,19 @@
 
 ---
 
+## v3.19 — 2026-04-06
+
+### 버그 수정
+- **버튼 텍스트 글씨 잘림 전면 해결**: `PrimaryBtn` / `SecondaryBtn` / `DangerBtn` 패딩을 `9px → 5px`으로 줄여 작은 고정 높이 버튼에서도 텍스트가 잘리지 않도록 수정
+  - LogDialog 첨부·메모추가 버튼 (26px → 30px)
+  - LogDialog 새 그룹·LogItemWidget 저장/취소 버튼 (28px → 30/32px)
+  - ProgressEntryRow 저장/취소 버튼 (32px → 34px)
+  - TaskSection 일괄처리 버튼 전체 (28px → 30px)
+  - ExportDialog·JsonBackupDialog 보조 버튼 (28px → 30px)
+  - TaskDialog 파일 선택 버튼 (32px → 34px)
+
+---
+
 ## v3.18 — 2026-04-06
 
 ### 버그 수정
