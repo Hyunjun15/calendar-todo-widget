@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.9"
+APP_VERSION      = "v3.10"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -3160,7 +3160,7 @@ class ProgressEntryRow(QWidget):
 
         self._ts_lbl = QLabel(self._ts)
         self._ts_lbl.setObjectName("LogTimestamp")
-        self._ts_lbl.setStyleSheet("font-size:9px;color:#45475a;background:transparent;")
+        self._ts_lbl.setStyleSheet("font-size:9px;color:#6c7086;background:transparent;")
         lay.addWidget(self._ts_lbl)
 
         self._btn_edit = QPushButton("✏")
@@ -3538,7 +3538,7 @@ class LogDialog(_MovableDialog):
             emp.setObjectName("TaskInfoDesc")
             emp.setAlignment(Qt.AlignmentFlag.AlignCenter)
             emp.setWordWrap(True)
-            emp.setStyleSheet("color:#45475a;padding:20px 0;")
+            emp.setStyleSheet("color:#6c7086;padding:20px 0;")
             self.prog_lay.insertWidget(0, emp)
         else:
             for i, grp in enumerate(groups):
@@ -3874,7 +3874,9 @@ class TaskSection(QWidget):
         self.items_lay = QVBoxLayout()
         self.items_lay.setContentsMargins(0,0,0,0); self.items_lay.setSpacing(4)
         b_lay.addLayout(self.items_lay)
-        self.empty_lbl = QLabel("태스크가 없습니다.")
+        _empty_text = {TASK_TODO: "할 일이 없습니다.", TASK_URGENT: "긴급업무가 없습니다.",
+                       TASK_PERSONAL: "개인업무가 없습니다."}.get(self.task_type, "항목이 없습니다.")
+        self.empty_lbl = QLabel(_empty_text)
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
@@ -5977,7 +5979,7 @@ class JsonBackupDialog(_MovableDialog):
 
         info = QLabel(
             "JSON 백업 파일을 불러온 뒤 가져올 항목을 선택하세요.\n"
-            "이미 존재하는 제목의 태스크는 건너뜁니다."
+            "이미 존재하는 제목의 할 일은 건너뜁니다."
         )
         info.setObjectName("TaskInfoDesc")
         info.setWordWrap(True)
@@ -6052,7 +6054,7 @@ class JsonBackupDialog(_MovableDialog):
             task_cnt = len(data.get("tasks", []))
             sched_cnt = len(data.get("schedules", []))
             self.lbl_exp_status.setText(
-                f"✅ 저장 완료: 태스크 {task_cnt}개, 일정 {sched_cnt}개\n{path}"
+                f"✅ 저장 완료: 할 일 {task_cnt}개, 일정 {sched_cnt}개\n{path}"
             )
             self.lbl_exp_status.setStyleSheet("color:#a6e3a1;")
         except Exception as e:
@@ -6129,7 +6131,7 @@ class JsonBackupDialog(_MovableDialog):
         src_date = data.get("exported_at", "?")[:16]
         self.lbl_imp_status.setText(
             f"파일: {Path(path).name}  ({src_ver}, {src_date})\n"
-            f"태스크 {len(self._import_tasks)}개, 일정 {len(self._import_sched)}개"
+            f"할 일 {len(self._import_tasks)}개, 일정 {len(self._import_sched)}개"
         )
         self.lbl_imp_status.setStyleSheet("color:#a6adc8;")
         self.btn_do_import.setEnabled(bool(self._import_tasks or self._import_sched))
@@ -6173,7 +6175,7 @@ class JsonBackupDialog(_MovableDialog):
                     added_s += 1
                 except Exception:
                     pass
-        self.lbl_imp_status.setText(f"✅ 완료: 태스크 {added_t}개, 일정 {added_s}개 가져옴")
+        self.lbl_imp_status.setText(f"✅ 완료: 할 일 {added_t}개, 일정 {added_s}개 가져옴")
         self.lbl_imp_status.setStyleSheet("color:#a6e3a1;")
         self.btn_do_import.setEnabled(False)
 
