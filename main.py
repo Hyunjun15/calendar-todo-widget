@@ -57,8 +57,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.5"
-APP_VERSION_DATE = "2026-04-03"
+APP_VERSION      = "v3.6"
+APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
     """
@@ -1744,6 +1744,7 @@ class CalendarWidget(QWidget):
         self.lbl_ym.setObjectName("CalHeaderLabel")
         self.lbl_ym.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_ym.setFont(QFont("맑은 고딕", 13, QFont.Weight.Bold))
+        self.lbl_ym.setToolTip("날짜를 더블클릭하면 일정을 추가할 수 있습니다")
         hdr.addWidget(self.lbl_ym, 1)
 
         self.btn_next = QPushButton("▶")
@@ -2667,7 +2668,7 @@ class TaskDialog(_MovableDialog):
         lay.setContentsMargins(24, 20, 24, 20)
         lay.setSpacing(12)
 
-        t = QLabel("태스크 편집" if self._is_edit else "✨ 새 태스크 추가")
+        t = QLabel("할 일 편집" if self._is_edit else "✨ 새 할 일 추가")
         t.setObjectName("DialogTitle")
         t.setFont(QFont("맑은 고딕", 14, QFont.Weight.Bold))
         lay.addWidget(t)
@@ -2679,7 +2680,7 @@ class TaskDialog(_MovableDialog):
 
         lay.addWidget(lbl("제목 *"))
         self.ed_title = QLineEdit()
-        self.ed_title.setPlaceholderText("태스크 제목")
+        self.ed_title.setPlaceholderText("제목을 입력하세요")
         lay.addWidget(self.ed_title)
 
         lay.addWidget(lbl("내용 (선택)"))
@@ -2690,7 +2691,7 @@ class TaskDialog(_MovableDialog):
 
         lay.addWidget(lbl("목표 (선택)"))
         self.ed_goal = QLineEdit()
-        self.ed_goal.setPlaceholderText("이 태스크의 목표")
+        self.ed_goal.setPlaceholderText("목표를 입력하세요 (선택)")
         lay.addWidget(self.ed_goal)
 
         row = QHBoxLayout()
@@ -3816,11 +3817,12 @@ class TaskSection(QWidget):
         self.lbl_stats = QLabel("0/0 완료"); self.lbl_stats.setObjectName("SectionStats")
         title_row.addWidget(self.lbl_stats)
         self.btn_batch = QPushButton("☐"); self.btn_batch.setObjectName("SectionCollapseBtn")
-        self.btn_batch.setFixedSize(26, 26); self.btn_batch.setToolTip("선택 모드")
+        self.btn_batch.setFixedSize(26, 26); self.btn_batch.setToolTip("선택 모드 — 체크 후 일괄 완료/삭제")
         self.btn_batch.clicked.connect(self._toggle_batch_mode)
         title_row.addWidget(self.btn_batch)
         self.btn_col = QPushButton("▼"); self.btn_col.setObjectName("SectionCollapseBtn")
-        self.btn_col.setFixedSize(26,26); self.btn_col.clicked.connect(self._toggle)
+        self.btn_col.setFixedSize(26,26); self.btn_col.setToolTip("섹션 접기/펼치기")
+        self.btn_col.clicked.connect(self._toggle)
         title_row.addWidget(self.btn_col)
         hdr_l.addLayout(title_row)
 
@@ -3871,7 +3873,7 @@ class TaskSection(QWidget):
         self.empty_lbl = QLabel("태스크가 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#45475a;padding:14px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
         self.empty_lbl.hide()
         b_lay.addWidget(self.empty_lbl)
         self.btn_add = QPushButton("＋  새 항목 추가  (Ctrl+N)")
@@ -4318,7 +4320,7 @@ class _CompletedItem(QFrame):
         if r["completed_at"]:
             try:
                 dt_lbl = QLabel(r["completed_at"][:10])
-                dt_lbl.setStyleSheet("color:#45475a;font-size:10px;background:transparent;")
+                dt_lbl.setStyleSheet("color:#6c7086;font-size:10px;background:transparent;")
                 lay.addWidget(dt_lbl)
             except Exception:
                 pass
@@ -4518,7 +4520,7 @@ class CompletedSection(QWidget):
         self.empty_lbl = QLabel("완료된 항목이 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#45475a;padding:14px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
         b_lay.addWidget(self.empty_lbl)
         lay.addWidget(self.body)
         self.body.hide()
@@ -5002,9 +5004,9 @@ class CoworkTodaySection(QWidget):
         self._clear(self._tmr_lay)
 
         if not today_ev and not tmr_ev:
-            ph = QLabel("iCal 미연결 또는 오늘·내일 연구실 일정 없음")
+            ph = QLabel("연구실 일정 없음  (iCal 미연결 시 설정 ⚙ 에서 연결)")
             ph.setStyleSheet(
-                "color:#45475a;font-size:10px;padding:4px 2px;background:transparent;")
+                "color:#6c7086;font-size:10px;padding:4px 2px;background:transparent;")
             self._today_lay.addWidget(ph)
             self._count_lbl.setText("없음")
             self._tmr_btn.hide()
@@ -6193,6 +6195,11 @@ class TitleBar(QWidget):
         self.btn_export.setFixedSize(34, 34); self.btn_export.setToolTip("업무 내보내기 (보고용)")
         lay.addWidget(self.btn_export)
 
+        self.btn_search = QPushButton("🔍")
+        self.btn_search.setObjectName("TitleBtn")
+        self.btn_search.setFixedSize(34, 34); self.btn_search.setToolTip("검색 (Ctrl+F)")
+        lay.addWidget(self.btn_search)
+
         self.btn_options = QPushButton("⚙")
         self.btn_options.setObjectName("TitleBtn")
         self.btn_options.setFixedSize(34, 34); self.btn_options.setToolTip("설정 (Ctrl+,)")
@@ -6353,6 +6360,7 @@ class MainWindow(QWidget):
         self.tb.btn_backup.clicked.connect(self._open_backup)
         self.tb.btn_export.clicked.connect(self._open_export)
         self.tb.btn_options.clicked.connect(self._open_options)
+        self.tb.btn_search.clicked.connect(self._toggle_search)
         self.sec_todo.completion_changed.connect(self.sec_completed.refresh)
         self.sec_urgent.completion_changed.connect(self.sec_completed.refresh)
         # 달력 날짜 선택 → 태스크 하이라이트 연동
