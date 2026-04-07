@@ -57,8 +57,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.22"
-APP_VERSION_DATE = "2026-04-06"
+APP_VERSION      = "v3.23"
+APP_VERSION_DATE = "2026-04-07"
 
 def resource_path(relative_path):
     """
@@ -1792,6 +1792,12 @@ class CalendarWidget(QWidget):
         self.day_grid.setSpacing(2)
         lay.addLayout(self.day_grid)
 
+        # 캘린더 사용 힌트
+        _cal_hint = QLabel("💡 날짜 우클릭 → 일정 추가  |  날짜 클릭 → 해당일 항목 강조")
+        _cal_hint.setAlignment(Qt.AlignmentFlag.AlignRight)
+        _cal_hint.setStyleSheet("color:#585b70;font-size:10px;padding:1px 4px 3px 0;")
+        lay.addWidget(_cal_hint)
+
         # ── 팀 일정 패널 (날짜 클릭 시 표시) ────────────────────────────
         self._cowork_sep = QFrame()
         self._cowork_sep.setFrameShape(QFrame.Shape.HLine)
@@ -2725,7 +2731,7 @@ class TaskDialog(_MovableDialog):
         col_d = QVBoxLayout()
         dh = QHBoxLayout()
         dh.addWidget(lbl("마감일"))
-        self.chk_due = QCheckBox("설정")
+        self.chk_due = QCheckBox("설정 (선택사항)")
         self.chk_due.setObjectName("TaskCheck")
         self.chk_due.toggled.connect(lambda v: self.de_due.setEnabled(v))
         dh.addWidget(self.chk_due)
@@ -3896,6 +3902,10 @@ class TaskSection(QWidget):
         tl.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
         if self.task_type == TASK_URGENT:
             tl.setToolTip("이번 주 처리해야 하는 단기 업무.\n과제/할 일(장기 관리)과 구분해서 사용하세요.")
+        elif self.task_type == TASK_TODO:
+            tl.setToolTip("마감일 기준으로 관리하는 장기 과제·할 일.\n긴급업무(단기)와 구분해서 사용하세요.")
+        elif self.task_type == TASK_PERSONAL:
+            tl.setToolTip("나만 보는 메모·약속·개인 일정.\n팀 공유 없이 혼자 관리하는 항목을 넣으세요.")
         title_row.addWidget(tl); title_row.addStretch()
         lbl_sort = QLabel("정렬:"); lbl_sort.setObjectName("SectionStats")
         title_row.addWidget(lbl_sort)
@@ -4604,6 +4614,7 @@ class _YearGroup(QWidget):
         self.btn_col = QPushButton("▶")
         self.btn_col.setObjectName("SectionCollapseBtn")
         self.btn_col.setFixedSize(24, 24)
+        self.btn_col.setToolTip("펼치기 / 접기")
         self.btn_col.clicked.connect(self._toggle)
         hdr_l.addWidget(self.btn_col)
         lay.addWidget(hdr)
@@ -6773,9 +6784,11 @@ class TitleBar(QWidget):
         self.btn_export.setFixedSize(34, 34); self.btn_export.setToolTip("업무 내보내기 (보고용)")
         lay.addWidget(self.btn_export)
 
-        self.btn_search = QPushButton("🔍")
+        self.btn_search = QPushButton("🔍 검색")
         self.btn_search.setObjectName("TitleBtn")
-        self.btn_search.setFixedSize(34, 34); self.btn_search.setToolTip("검색 (Ctrl+F)")
+        self.btn_search.setFixedHeight(34)
+        self.btn_search.setMinimumWidth(60)
+        self.btn_search.setToolTip("검색 (Ctrl+F)")
         lay.addWidget(self.btn_search)
 
         self.btn_options = QPushButton("⚙")
@@ -7529,6 +7542,28 @@ class MainWindow(QWidget):
         notif_on = self.settings.value("notif_enabled", True, type=bool)
         if not notif_on:
             self._deadline_timer.stop()
+
+        # 첫 실행 온보딩
+        if self.settings.value("first_run", True, type=bool):
+            self.settings.setValue("first_run", False)
+            QTimer.singleShot(400, self._show_onboarding)
+
+    def _show_onboarding(self):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("📋 처음 오셨군요! — 간단 사용 가이드")
+        msg.setText(
+            "<b>Calendar and To do list</b>에 오신 것을 환영합니다!<br><br>"
+            "이 앱에는 4가지 섹션이 있습니다:<br><br>"
+            "📝 <b>과제 / 할 일</b> — 마감일 기준으로 관리하는 장기 과제·할 일<br>"
+            "🚨 <b>긴급업무</b> — 이번 주 안에 처리해야 하는 단기 업무<br>"
+            "👤 <b>개인업무</b> — 나만 보는 메모·약속·개인 일정<br>"
+            "📅 <b>일정</b> — 날짜·시간이 정해진 이벤트 (캘린더와 연동)<br><br>"
+            "<b>💡 팁</b>: 캘린더 날짜를 <b>우클릭</b>하면 일정을 바로 추가할 수 있어요.<br>"
+            "상단 🔍 <b>검색</b> 버튼으로 모든 항목을 검색할 수 있습니다."
+        )
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.button(QMessageBox.StandardButton.Ok).setText("시작하기")
+        msg.exec()
 
     # ── 백업/복원 다이얼로그 ────────────────────────────────────────────────
     def _open_backup(self):

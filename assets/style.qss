@@ -46,7 +46,7 @@ QPushButton#TitleBtn {
     color: #6c7086;
 }
 QPushButton#TitleBtn:hover  { background-color: #313244; color: #cdd6f4; }
-QPushButton#TitleBtn:checked { background-color: #313244; color: #89b4fa; }
+QPushButton#TitleBtn:checked { background-color: #3d2f52; color: #cba6f7; border: 1px solid #cba6f7; }
 
 QPushButton#TitleBtnClose {
     background: transparent;
