@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.20"
+APP_VERSION      = "v3.22"
 APP_VERSION_DATE = "2026-04-06"
 
 def resource_path(relative_path):
@@ -2368,41 +2368,26 @@ class MiscItemWidget(QFrame):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _MovableDialog(QDialog):
-    """Frameless QDialog with drag-to-move, QSizeGrip resize, and size persistence."""
+    """Frameless QDialog — drag-to-move, Windows native edge-resize, size persistence."""
 
-    # QSettings에 저장할 때 사용할 key prefix (서브클래스에서 오버라이드 가능)
     _settings_key: str = ""
+    _RESIZE_MARGIN = 6   # px — 테두리 리사이즈 감지 범위
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._drag_pos = None
-        self._grip: QSizeGrip | None = None
-        self._resizing = False
+        self._grip     = None   # 우하단 ⠿ 힌트 레이블 (시각용)
 
+    # ── 크기/이동 저장·복원 ────────────────────────────────────────────────
     def showEvent(self, event):
         super().showEvent(event)
         if self._grip is None:
-            self._grip = QSizeGrip(self)
-            self._grip.resize(22, 22)
-            # 시각적 리사이즈 핸들 — 우하단 점 3개로 표시
-            self._grip.setStyleSheet(
-                "QSizeGrip{"
-                "  background:transparent;"
-                "  image:none;"
-                "  border-image:none;"
-                "}"
-            )
-            # 리사이즈 힌트 레이블 (실제 드래그는 QSizeGrip이 처리)
-            self._resize_hint = QLabel("⠿", self)
-            self._resize_hint.setFixedSize(22, 22)
-            self._resize_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._resize_hint.setStyleSheet(
-                "color:#45475a;font-size:13px;background:transparent;"
-                "letter-spacing:-1px;"
-            )
-            self._resize_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._grip = QLabel("⠿", self)
+            self._grip.setFixedSize(20, 20)
+            self._grip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._grip.setStyleSheet("color:#45475a;font-size:12px;background:transparent;")
+            self._grip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._position_grip()
-        # 저장된 크기 복원
         key = self._settings_key or self.__class__.__name__
         settings = QSettings("CalendarTodoList", "MainWindowV2")
         saved = settings.value(f"dialog_size/{key}")
@@ -2414,16 +2399,13 @@ class _MovableDialog(QDialog):
                 pass
 
     def closeEvent(self, event):
-        self._save_size()
-        super().closeEvent(event)
+        self._save_size(); super().closeEvent(event)
 
     def accept(self):
-        self._save_size()
-        super().accept()
+        self._save_size(); super().accept()
 
     def reject(self):
-        self._save_size()
-        super().reject()
+        self._save_size(); super().reject()
 
     def _save_size(self):
         key = self._settings_key or self.__class__.__name__
@@ -2436,27 +2418,46 @@ class _MovableDialog(QDialog):
 
     def _position_grip(self):
         if self._grip:
-            gx = self.width()  - self._grip.width()
-            gy = self.height() - self._grip.height()
-            self._grip.move(gx, gy)
+            self._grip.move(self.width() - 20, self.height() - 20)
             self._grip.raise_()
-        if hasattr(self, "_resize_hint") and self._resize_hint:
-            self._resize_hint.move(
-                self.width()  - self._resize_hint.width(),
-                self.height() - self._resize_hint.height()
-            )
-            self._resize_hint.raise_()
 
-    def _in_grip_area(self, pos: QPoint) -> bool:
-        """우하단 28×28 grip 영역인지 확인"""
-        return (pos.x() >= self.width() - 28 and
-                pos.y() >= self.height() - 28)
+    # ── Windows 네이티브 리사이즈 (WM_NCHITTEST) ──────────────────────────
+    def nativeEvent(self, eventType, message):
+        """테두리 드래그로 창 크기 조절 — Windows WM_NCHITTEST 활용"""
+        if eventType == b"windows_generic_MSG":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    # lParam = 화면 좌표 (물리 픽셀) → 위젯 로컬 좌표로 변환
+                    sx = ctypes.c_int16(msg.lParam & 0xFFFF).value
+                    sy = ctypes.c_int16((msg.lParam >> 16) & 0xFFFF).value
+                    pos = self.mapFromGlobal(QPoint(sx, sy))
+                    m = self._RESIZE_MARGIN
+                    w, h = self.width(), self.height()
+                    lft = pos.x() < m
+                    rgt = pos.x() > w - m
+                    top = pos.y() < m
+                    bot = pos.y() > h - m
+                    # 코너 → 변 순서로 우선순위 처리
+                    if lft and top: return True, 13   # HTTOPLEFT
+                    if rgt and top: return True, 14   # HTTOPRIGHT
+                    if lft and bot: return True, 16   # HTBOTTOMLEFT
+                    if rgt and bot: return True, 17   # HTBOTTOMRIGHT
+                    if lft:         return True, 10   # HTLEFT
+                    if rgt:         return True, 11   # HTRIGHT
+                    if top:         return True, 12   # HTTOP
+                    if bot:         return True, 15   # HTBOTTOM
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
 
+    # ── 드래그로 창 이동 ───────────────────────────────────────────────────
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if not self._in_grip_area(event.position().toPoint()):
-                self._drag_pos = (event.globalPosition().toPoint()
-                                  - self.frameGeometry().topLeft())
+            self._drag_pos = (event.globalPosition().toPoint()
+                              - self.frameGeometry().topLeft())
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -2523,7 +2524,7 @@ class ScheduleDialog(_MovableDialog):
             clr = SCHED_COLORS[etype]
             btn.setStyleSheet(
                 f"QPushButton{{background:transparent;border:2px solid #45475a;border-radius:8px;"
-                f"color:palette(text);font-size:12px;padding:0 8px;}}"
+                f"font-size:12px;padding:0 8px;}}"
                 f"QPushButton:checked{{background:rgba({self._hex_to_rgb(clr)},0.15);"
                 f"border:2px solid {clr};color:{clr};font-weight:bold;}}"
                 f"QPushButton:hover{{border-color:{clr};color:{clr};}}"
@@ -2775,44 +2776,44 @@ class TaskDialog(_MovableDialog):
             # 기본값 선택
             self._color_btns[0].setChecked(True)
 
-        # 첨부 파일 (여러 개 — 클릭 선택 또는 드래그앤드롭)
+        # 첨부 파일 (여러 개 — 버튼 선택 또는 드래그앤드롭)
         if self._task_type in (TASK_TODO, TASK_URGENT, TASK_MISC):
-            lay.addWidget(lbl("📎  첨부 파일"))
+            # 헤더 행: "📎 첨부 파일" 레이블 + 우측 "＋ 파일 추가" 버튼
+            file_hdr = QHBoxLayout()
+            file_hdr.addWidget(lbl("📎  첨부 파일"))
+            file_hdr.addStretch()
+            btn_add_file = QPushButton("＋  파일 추가")
+            btn_add_file.setObjectName("SecondaryBtn")
+            btn_add_file.setFixedHeight(26)
+            btn_add_file.setToolTip("파일 선택 (여러 개 가능) — 드래그앤드롭도 지원")
+            btn_add_file.clicked.connect(self._add_file)
+            file_hdr.addWidget(btn_add_file)
+            lay.addLayout(file_hdr)
+
+            # 파일 목록 드롭 영역
             self._drop_area = QFrame()
             self._drop_area.setObjectName("FileDropArea")
+            self._drop_area.setStyleSheet(
+                "QFrame#FileDropArea{border:1px dashed #3d3d58;border-radius:8px;"
+                "background:#1a1a28;}"
+            )
             self._drop_area.setAcceptDrops(True)
             self._drop_area.dragEnterEvent = self._file_drag_enter
             self._drop_area.dragLeaveEvent = self._file_drag_leave
             self._drop_area.dropEvent      = self._file_drop
-            self._drop_area.mousePressEvent = lambda e: self._add_file() if e.button() == Qt.MouseButton.LeftButton else None
-            self._drop_area.setCursor(Qt.CursorShape.PointingHandCursor)
             drop_lay = QVBoxLayout(self._drop_area)
-            drop_lay.setContentsMargins(10, 10, 10, 8)
-            drop_lay.setSpacing(4)
+            drop_lay.setContentsMargins(8, 6, 8, 6)
+            drop_lay.setSpacing(2)
 
-            # 빈 상태 힌트
-            hint_w = QWidget()
-            hint_w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            hint_lay = QVBoxLayout(hint_w)
-            hint_lay.setContentsMargins(0, 4, 0, 4)
-            hint_lay.setSpacing(2)
-            hint_icon = QLabel("📂")
-            hint_icon.setStyleSheet("font-size:22px;background:transparent;color:#45475a;")
-            hint_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint_lay.addWidget(hint_icon)
-            hint_text = QLabel("드래그하거나 클릭해서 파일 추가")
-            hint_text.setStyleSheet("color:#6c7086;font-size:11px;background:transparent;")
-            hint_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint_lay.addWidget(hint_text)
-            hint_sub = QLabel("여러 개 선택 가능")
-            hint_sub.setStyleSheet("color:#45475a;font-size:10px;background:transparent;")
-            hint_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint_lay.addWidget(hint_sub)
-            self._file_empty_lbl = hint_w
-            drop_lay.addWidget(hint_w)
+            self._file_empty_lbl = QLabel("파일을 드래그하거나 위 버튼으로 추가")
+            self._file_empty_lbl.setStyleSheet(
+                "color:#45475a;font-size:10px;background:transparent;padding:2px 0;"
+            )
+            self._file_empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            drop_lay.addWidget(self._file_empty_lbl)
 
             self._file_list_lay = QVBoxLayout()
-            self._file_list_lay.setSpacing(3)
+            self._file_list_lay.setSpacing(2)
             self._file_list_lay.setContentsMargins(0, 0, 0, 0)
             drop_lay.addLayout(self._file_list_lay)
             lay.addWidget(self._drop_area)
@@ -2875,20 +2876,20 @@ class TaskDialog(_MovableDialog):
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
             self._drop_area.setStyleSheet(
-                "QFrame#FileDropArea{border:2px dashed #89b4fa;border-radius:10px;"
-                "background:#1a1a30;min-height:90px;}"
+                "QFrame#FileDropArea{border:1px dashed #89b4fa;border-radius:8px;"
+                "background:#1a1a34;}"
             )
 
     def _file_drag_leave(self, e):
         self._drop_area.setStyleSheet(
-            "QFrame#FileDropArea{border:2px dashed #45475a;border-radius:10px;"
-            "background:#181825;min-height:90px;}"
+            "QFrame#FileDropArea{border:1px dashed #3d3d58;border-radius:8px;"
+            "background:#1a1a28;}"
         )
 
     def _file_drop(self, e):
         self._drop_area.setStyleSheet(
-            "QFrame#FileDropArea{border:2px dashed #45475a;border-radius:10px;"
-            "background:#181825;min-height:90px;}"
+            "QFrame#FileDropArea{border:1px dashed #3d3d58;border-radius:8px;"
+            "background:#1a1a28;}"
         )
         for url in e.mimeData().urls():
             path = url.toLocalFile()
