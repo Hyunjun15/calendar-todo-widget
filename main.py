@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.25"
+APP_VERSION      = "v3.26"
 APP_VERSION_DATE = "2026-04-08"
 
 def resource_path(relative_path):
@@ -3650,12 +3650,12 @@ class LogDialog(_MovableDialog):
         self._task = db.get_task(task_id)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumSize(560, 500)
-        self.resize(720, 740)
-        self._cur_tab = "general"   # "general" | "progress"
+        self.setMinimumSize(560, 480)
+        self._cur_tab = "general"
         self._log_attach_path = ""
         self._build()
         self._switch_tab("general")
+        self._auto_size()
         QShortcut(QKeySequence("Escape"), self, self.accept)
         QShortcut(QKeySequence("Ctrl+Return"), self, self._add_general)
 
@@ -3887,6 +3887,36 @@ class LogDialog(_MovableDialog):
         l = QLabel(text); l.setObjectName(obj)
         if font: l.setFont(font)
         return l
+
+    def _auto_size(self):
+        """로그 내용 양에 맞게 초기 창 크기 자동 설정."""
+        from PySide6.QtGui import QFontMetrics
+        logs = self.db.get_general_logs(self.task_id)
+
+        # ── 폭: 가장 긴 줄 기준 ──────────────────────────────────────────
+        fm = QFontMetrics(self.font())
+        char_w = fm.horizontalAdvance("가")   # 한글 한 글자 폭
+        max_px = 0
+        for lg in logs:
+            for line in lg["content"].split("\n"):
+                px = fm.horizontalAdvance(line)
+                if px > max_px:
+                    max_px = px
+        SIDEBAR = 150
+        PADDING = 80   # 좌우 여백 + 스크롤바
+        content_w = max_px + PADDING
+        target_w = SIDEBAR + max(content_w, 360)   # 최소 콘텐츠 360px
+        target_w = max(560, min(target_w, 960))    # 전체 560~960px
+
+        # ── 높이: 로그 수 × 추정 행 높이 ────────────────────────────────
+        ROW_H    = max(60, char_w * 3)   # 폰트 기반 행 높이 추정 (최소 60)
+        INPUT_H  = 200                    # 입력 패널 + 헤더
+        HEADER_H = 120                    # 태스크 정보 + 탭 헤더
+        log_area = len(logs) * ROW_H
+        target_h = HEADER_H + log_area + INPUT_H
+        target_h = max(480, min(target_h, 880))    # 480~880px
+
+        self.resize(target_w, target_h)
 
     def _switch_tab(self, key: str):
         self._cur_tab = key
