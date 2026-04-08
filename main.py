@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.24"
+APP_VERSION      = "v3.25"
 APP_VERSION_DATE = "2026-04-08"
 
 def resource_path(relative_path):
@@ -3441,10 +3441,11 @@ class LogItemWidget(QFrame):
 
         # 편집 모드: 기본 숨김
         self.ed_content = QPlainTextEdit()
-        self.ed_content.setMaximumHeight(90)
+        self.ed_content.setMinimumHeight(60)
         self.ed_content.setVisible(False)
         self.ed_content.setPlaceholderText("내용 수정...")
         cl.addWidget(self.ed_content)
+        cl.setStretchFactor(self.ed_content, 1)
 
         # 편집 모드: 파일 경로 변경
         self.ed_file_row = QWidget()
@@ -3453,7 +3454,6 @@ class LogItemWidget(QFrame):
         efr_lay.setSpacing(4)
         self.ed_file_path = QLineEdit()
         self.ed_file_path.setPlaceholderText("첨부 파일 경로 (선택 사항)...")
-        self.ed_file_path.setMaximumHeight(28)
         efr_lay.addWidget(self.ed_file_path, 1)
         btn_fp_browse = QPushButton("📂")
         btn_fp_browse.setObjectName("LogFileBtn")
@@ -3808,9 +3808,8 @@ class LogDialog(_MovableDialog):
         self.scroll_general.setMinimumHeight(80)
         splitter_g.addWidget(self.scroll_general)
 
-        # 아래쪽: 입력 패널 (최대 높이 고정 → 로그 목록이 대부분의 공간 차지)
+        # 아래쪽: 입력 패널 (splitter로 사용자가 비율 조절 가능)
         input_panel = QWidget()
-        input_panel.setMaximumHeight(196)      # 입력 영역 상한선
         inp_lay = QVBoxLayout(input_panel)
         inp_lay.setContentsMargins(0, 6, 0, 0)
         inp_lay.setSpacing(5)
@@ -3823,9 +3822,8 @@ class LogDialog(_MovableDialog):
 
         self.ed = QPlainTextEdit()
         self.ed.setPlaceholderText("내용을 입력하세요... (여러 줄 가능)")
-        self.ed.setMinimumHeight(72)
-        self.ed.setMaximumHeight(96)           # 텍스트 에디터 최대 높이 고정
-        inp_lay.addWidget(self.ed)
+        self.ed.setMinimumHeight(60)
+        inp_lay.addWidget(self.ed, 1)
 
         fa = QHBoxLayout(); fa.setSpacing(6)
         self.lbl_attach = QLabel("📎 파일 없음")

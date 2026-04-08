@@ -2,6 +2,14 @@
 
 ---
 
+## v3.25 — 2026-04-08
+
+### 버그 수정
+- **상세로그 탭 편집 모드 높이 고정 제거**: `LogItemWidget` 파일 경로 입력창(`setMaximumHeight(28)` 삭제)·내용 편집창(`setMaximumHeight(90)` → `setMinimumHeight(60)`) — 폰트 크기 변경 시 잘리지 않고 정상 표시
+- **로그 다이얼로그 입력 패널 높이 고정 제거**: `input_panel.setMaximumHeight(196)` 및 `self.ed.setMaximumHeight(96)` 제거 — 창 확대 시 입력 영역도 함께 확장
+
+---
+
 ## v3.24 — 2026-04-08
 
 ### 기능 추가
