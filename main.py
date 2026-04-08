@@ -2583,11 +2583,13 @@ class _FilePickerDialog(_MovableDialog):
             nav.addWidget(b)
 
         self._path_bar = QLineEdit()
-        self._path_bar.setReadOnly(True)
+        self._path_bar.setPlaceholderText("경로를 입력 후 Enter…")
         self._path_bar.setStyleSheet(
             "QLineEdit{background:#1e1e2e;border:1px solid #3d3d58;border-radius:6px;"
-            "padding:3px 8px;color:#a6adc8;font-size:11px;}"
+            "padding:3px 8px;color:#cdd6f4;font-size:11px;}"
+            "QLineEdit:focus{border-color:#89b4fa;}"
         )
+        self._path_bar.returnPressed.connect(self._nav_from_bar)
         nav.addWidget(self._path_bar, 1)
         lay.addLayout(nav)
 
@@ -2607,7 +2609,9 @@ class _FilePickerDialog(_MovableDialog):
         )
         self._list.itemDoubleClicked.connect(self._on_double)
         self._list.itemSelectionChanged.connect(self._on_sel_changed)
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         lay.addWidget(self._list)
+        lay.setStretchFactor(self._list, 1)
 
         # ── 선택 파일 표시 + 직접 입력 ────────────────────────────────────
         foot = QFrame()
@@ -2724,15 +2728,43 @@ class _FilePickerDialog(_MovableDialog):
     def _upd_sel_lbl(self):
         if not self._selected:
             self._sel_lbl.setText("없음")
+            self._sel_lbl.setToolTip("")
         elif len(self._selected) == 1:
             self._sel_lbl.setText(Path(self._selected[0]).name)
+            self._sel_lbl.setToolTip(self._selected[0])  # 전체 경로는 툴팁으로
         else:
-            self._sel_lbl.setText(f"{len(self._selected)}개 선택됨")
+            names = ", ".join(Path(p).name for p in self._selected[:3])
+            suffix = f" 외 {len(self._selected)-3}개" if len(self._selected) > 3 else ""
+            self._sel_lbl.setText(f"{names}{suffix}")
+            self._sel_lbl.setToolTip("\n".join(self._selected))
 
     def _go_up(self):
         parent = self._cur_dir.parent
         if parent != self._cur_dir:
             self._nav(parent)
+
+    def _nav_from_bar(self):
+        """경로 바에 직접 입력 후 Enter → 해당 경로로 이동"""
+        text = self._path_bar.text().strip()
+        if not text:
+            return
+        p = Path(text)
+        if p.is_dir():
+            self._nav(p)
+        elif p.is_file():
+            self._selected = [str(p)]
+            self._upd_sel_lbl()
+            self._btn_ok.setEnabled(True)
+        else:
+            self._path_bar.setStyleSheet(
+                "QLineEdit{background:#2d1b1b;border:1px solid #f38ba8;border-radius:6px;"
+                "padding:3px 8px;color:#f38ba8;font-size:11px;}"
+            )
+            QTimer.singleShot(1200, lambda: self._path_bar.setStyleSheet(
+                "QLineEdit{background:#1e1e2e;border:1px solid #3d3d58;border-radius:6px;"
+                "padding:3px 8px;color:#cdd6f4;font-size:11px;}"
+                "QLineEdit:focus{border-color:#89b4fa;}"
+            ))
 
     def _try_accept(self):
         if self._btn_ok.isEnabled():
@@ -2867,8 +2899,9 @@ class ScheduleDialog(_MovableDialog):
         lay.addWidget(self._mk_lbl("내용 (선택)"))
         self.ed_content = QTextEdit()
         self.ed_content.setPlaceholderText("상세 내용...")
-        self.ed_content.setMaximumHeight(80)
+        self.ed_content.setMinimumHeight(60)
         lay.addWidget(self.ed_content)
+        lay.setStretchFactor(self.ed_content, 1)
 
         lay.addSpacing(4)
         br = QHBoxLayout(); br.addStretch()
@@ -2993,8 +3026,9 @@ class TaskDialog(_MovableDialog):
         lay.addWidget(lbl("내용 (선택)"))
         self.ed_desc = QTextEdit()
         self.ed_desc.setPlaceholderText("상세 내용...")
-        self.ed_desc.setMaximumHeight(80)
+        self.ed_desc.setMinimumHeight(60)
         lay.addWidget(self.ed_desc)
+        lay.setStretchFactor(self.ed_desc, 1)
 
         lay.addWidget(lbl("목표 (선택)"))
         self.ed_goal = QLineEdit()
@@ -4596,8 +4630,9 @@ class _UrgentLinkDialog(_MovableDialog):
             lay.addWidget(note_lbl)
             self.ed = QPlainTextEdit()
             self.ed.setPlaceholderText("이번 완료에서 달성한 내용, 결과 등...")
-            self.ed.setMaximumHeight(80)
+            self.ed.setMinimumHeight(60)
             lay.addWidget(self.ed)
+            lay.setStretchFactor(self.ed, 1)
 
             br = QHBoxLayout(); br.addStretch()
             bc = QPushButton("건너뛰기"); bc.setObjectName("SecondaryBtn")
