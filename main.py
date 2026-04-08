@@ -57,8 +57,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.23"
-APP_VERSION_DATE = "2026-04-07"
+APP_VERSION      = "v3.24"
+APP_VERSION_DATE = "2026-04-08"
 
 def resource_path(relative_path):
     """
@@ -1221,19 +1221,49 @@ class ICalParser:
 
     @staticmethod
     def _parse_datetime(value: str) -> tuple[str | None, str | None]:
-        """iCal date/datetime → (YYYY-MM-DD, HH:MM) 또는 (YYYY-MM-DD, None) for all-day"""
+        """iCal date/datetime → (YYYY-MM-DD, HH:MM) 또는 (YYYY-MM-DD, None) for all-day.
+        UTC(Z suffix) 또는 오프셋(+HHMM/-HHMM) 포함 시 로컬 타임존으로 변환."""
+        import datetime as _dt_mod
         value = value.strip()
         if "T" in value:
             t_idx = value.index("T")
             date_part = value[:t_idx]
-            time_part = value[t_idx + 1:]   # "100000" or "100000Z"
+            time_part = value[t_idx + 1:]
             if len(date_part) == 8 and date_part.isdigit():
-                date_str = f"{date_part[0:4]}-{date_part[4:6]}-{date_part[6:8]}"
-                if len(time_part) >= 4 and time_part[:4].isdigit():
-                    time_str = f"{time_part[0:2]}:{time_part[2:4]}"
+                digits = time_part[:6]
+                if len(digits) == 6 and digits.isdigit():
+                    hour, minute, second = int(digits[0:2]), int(digits[2:4]), int(digits[4:6])
+                    suffix = time_part[6:]
+                    try:
+                        if suffix == "Z":
+                            # UTC → 로컬 변환
+                            aware = _dt_mod.datetime(
+                                int(date_part[:4]), int(date_part[4:6]), int(date_part[6:8]),
+                                hour, minute, second, tzinfo=_dt_mod.timezone.utc)
+                            local = aware.astimezone()
+                            return local.strftime("%Y-%m-%d"), local.strftime("%H:%M")
+                        elif suffix and suffix[0] in ('+', '-'):
+                            # 오프셋 (+0900, -0500 등)
+                            sign   = 1 if suffix[0] == '+' else -1
+                            off    = suffix[1:].replace(":", "")
+                            if len(off) >= 4 and off[:4].isdigit():
+                                off_td = _dt_mod.timedelta(
+                                    hours=sign * int(off[:2]),
+                                    minutes=sign * int(off[2:4]))
+                                tz     = _dt_mod.timezone(off_td)
+                                aware  = _dt_mod.datetime(
+                                    int(date_part[:4]), int(date_part[4:6]), int(date_part[6:8]),
+                                    hour, minute, second, tzinfo=tz)
+                                local  = aware.astimezone()
+                                return local.strftime("%Y-%m-%d"), local.strftime("%H:%M")
+                    except Exception:
+                        pass
+                    # 타임존 없는 로컬 시간
+                    date_str = f"{date_part[0:4]}-{date_part[4:6]}-{date_part[6:8]}"
+                    return date_str, f"{hour:02d}:{minute:02d}"
                 else:
-                    time_str = None
-                return date_str, time_str
+                    date_str = f"{date_part[0:4]}-{date_part[4:6]}-{date_part[6:8]}"
+                    return date_str, None
         elif len(value) == 8 and value.isdigit():
             return f"{value[0:4]}-{value[4:6]}-{value[6:8]}", None
         return None, None
@@ -1731,6 +1761,10 @@ class CalendarWidget(QWidget):
         self._popup = EventPopup(self)  # parent 전달 → 메인 윈도우 위 z-order 보장
         self._setup_ui()
         self.refresh()
+        # 키보드 단축키 (Ctrl+Left/Right: 월 이동, Home: 오늘)
+        QShortcut(QKeySequence("Ctrl+Left"),  self, self._prev,     context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        QShortcut(QKeySequence("Ctrl+Right"), self, self._next,     context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        QShortcut(QKeySequence("Home"),       self, self._goto_today, context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
 
     def _setup_ui(self):
         lay = QVBoxLayout(self)
@@ -2018,10 +2052,19 @@ class CalendarWidget(QWidget):
         # 단, 캘린더를 우클릭하면 일정 추가 메뉴 표시
 
     def contextMenuEvent(self, e):
-        """달력 우클릭 → 날짜에 일정 또는 개인업무 추가"""
-        if not self._selected:
+        """달력 우클릭 → 커서 아래 날짜에 일정 또는 개인업무 추가"""
+        # 커서 바로 아래 CalDayButton 탐지 (없으면 선택된 날짜로 fallback)
+        child = self.childAt(e.pos())
+        target_date = None
+        if isinstance(child, CalDayButton):
+            target_date = child._date
+        elif child is not None and isinstance(child.parent(), CalDayButton):
+            target_date = child.parent()._date
+        if target_date is None:
+            target_date = self._selected
+        if target_date is None:
             return
-        d_str = self._selected.strftime("%m/%d")
+        d_str = target_date.strftime("%m/%d")
         menu = QMenu(self)
         menu.setStyleSheet(
             "QMenu{background:#313244;border:1px solid #45475a;border-radius:8px;padding:4px;}"
@@ -2034,12 +2077,12 @@ class CalendarWidget(QWidget):
         a_personal = menu.addAction(f"👤  {d_str} 개인업무 추가")
         ch = menu.exec(e.globalPos())
         if ch == a_sched:
-            self.add_schedule_requested.emit(self._selected)
+            self.add_schedule_requested.emit(target_date)
         elif ch == a_vacation:
-            self._vacation_req = self._selected
-            self.add_schedule_requested.emit(self._selected)   # ScheduleSection이 vacation 타입 처리
+            self._vacation_req = target_date
+            self.add_schedule_requested.emit(target_date)   # ScheduleSection이 vacation 타입 처리
         elif ch == a_personal:
-            self.add_personal_task_requested.emit(self._selected)
+            self.add_personal_task_requested.emit(target_date)
 
     def refresh(self):
         tasks = self.db.get_tasks()
@@ -2478,6 +2521,248 @@ class _MovableDialog(QDialog):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 9-A2. CUSTOM FILE PICKER DIALOG
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _FilePickerDialog(_MovableDialog):
+    """프레임리스 파일 선택 다이얼로그 — 테두리 드래그 리사이즈, 다중 선택 지원."""
+
+    _settings_key = "file_picker"
+
+    def __init__(self, title: str = "파일 선택", multi: bool = False, parent=None):
+        super().__init__(parent)
+        self._multi    = multi
+        self._selected: list[str] = []
+        self._cur_dir  = Path.home()
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setModal(True)
+        self.setMinimumSize(560, 420)
+        self._build(title)
+        self._nav(self._cur_dir)
+        QShortcut(QKeySequence("Escape"),    self, self.reject)
+        QShortcut(QKeySequence("Return"),    self, self._try_accept)
+        QShortcut(QKeySequence("Backspace"), self, self._go_up)
+        QShortcut(QKeySequence("Alt+Up"),    self, self._go_up)
+
+    def _build(self, title: str):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # ── 제목 바 (드래그 이동) ────────────────────────────────────────
+        tb = QFrame(); tb.setObjectName("DialogTitleBar")
+        tb.setFixedHeight(42)
+        tb_lay = QHBoxLayout(tb)
+        tb_lay.setContentsMargins(14, 0, 6, 0); tb_lay.setSpacing(8)
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet("font-weight:bold;font-size:13px;color:#cdd6f4;")
+        tb_lay.addWidget(lbl_title)
+        tb_lay.addStretch()
+        btn_close = QPushButton("✕"); btn_close.setObjectName("TitleBtnClose")
+        btn_close.setFixedSize(34, 34); btn_close.clicked.connect(self.reject)
+        tb_lay.addWidget(btn_close)
+        lay.addWidget(tb)
+
+        # ── 경로 네비게이션 바 ────────────────────────────────────────────
+        nav = QHBoxLayout()
+        nav.setContentsMargins(12, 8, 12, 4); nav.setSpacing(6)
+
+        self._btn_up = QPushButton("↑"); self._btn_up.setObjectName("SecondaryBtn")
+        self._btn_up.setFixedSize(30, 28); self._btn_up.setToolTip("상위 폴더 (Backspace)")
+        self._btn_up.clicked.connect(self._go_up)
+        nav.addWidget(self._btn_up)
+
+        for label, path, tip in [
+            ("🏠", Path.home(), "홈"),
+            ("🖥", Path.home() / "Desktop", "바탕화면"),
+            ("📥", Path.home() / "Downloads", "다운로드"),
+        ]:
+            b = QPushButton(label); b.setObjectName("SecondaryBtn")
+            b.setFixedSize(30, 28); b.setToolTip(tip)
+            b.clicked.connect(lambda _, p=path: self._nav(p))
+            nav.addWidget(b)
+
+        self._path_bar = QLineEdit()
+        self._path_bar.setReadOnly(True)
+        self._path_bar.setStyleSheet(
+            "QLineEdit{background:#1e1e2e;border:1px solid #3d3d58;border-radius:6px;"
+            "padding:3px 8px;color:#a6adc8;font-size:11px;}"
+        )
+        nav.addWidget(self._path_bar, 1)
+        lay.addLayout(nav)
+
+        # ── 파일 리스트 ────────────────────────────────────────────────────
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem as _LWI
+        self._list = QListWidget()
+        self._list.setObjectName("FilePickerList")
+        self._list.setStyleSheet(
+            "QListWidget{background:#181825;border:none;padding:4px 6px;outline:none;}"
+            "QListWidget::item{padding:5px 10px;border-radius:6px;color:#cdd6f4;min-height:24px;}"
+            "QListWidget::item:hover{background:#313244;}"
+            "QListWidget::item:selected{background:#45475a;color:#cdd6f4;}"
+        )
+        self._list.setSelectionMode(
+            QListWidget.SelectionMode.ExtendedSelection if self._multi
+            else QListWidget.SelectionMode.SingleSelection
+        )
+        self._list.itemDoubleClicked.connect(self._on_double)
+        self._list.itemSelectionChanged.connect(self._on_sel_changed)
+        lay.addWidget(self._list)
+
+        # ── 선택 파일 표시 + 직접 입력 ────────────────────────────────────
+        foot = QFrame()
+        foot.setStyleSheet("QFrame{background:#13131d;border-top:1px solid #2e2e48;}")
+        foot_lay = QVBoxLayout(foot)
+        foot_lay.setContentsMargins(12, 8, 12, 8); foot_lay.setSpacing(4)
+
+        sel_row = QHBoxLayout()
+        lbl_sel = QLabel("선택:"); lbl_sel.setStyleSheet("color:#6c7086;font-size:11px;")
+        sel_row.addWidget(lbl_sel)
+        self._sel_lbl = QLabel("없음")
+        self._sel_lbl.setStyleSheet("color:#a6adc8;font-size:11px;")
+        self._sel_lbl.setWordWrap(True)
+        sel_row.addWidget(self._sel_lbl, 1)
+        btn_type = QPushButton("직접 입력")
+        btn_type.setObjectName("SecondaryBtn"); btn_type.setFixedHeight(24)
+        btn_type.setStyleSheet("font-size:10px;padding:0 8px;")
+        btn_type.clicked.connect(self._manual_input)
+        sel_row.addWidget(btn_type)
+        foot_lay.addLayout(sel_row)
+
+        btn_row = QHBoxLayout(); btn_row.setSpacing(8)
+        btn_row.addStretch()
+        btn_cancel = QPushButton("취소"); btn_cancel.setObjectName("SecondaryBtn")
+        btn_cancel.setFixedHeight(34); btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        self._btn_ok = QPushButton("선택"); self._btn_ok.setObjectName("PrimaryBtn")
+        self._btn_ok.setFixedHeight(34); self._btn_ok.setEnabled(False)
+        self._btn_ok.clicked.connect(self.accept)
+        btn_row.addWidget(self._btn_ok)
+        foot_lay.addLayout(btn_row)
+        lay.addWidget(foot)
+
+    def _nav(self, path: Path):
+        try:
+            items = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except (PermissionError, FileNotFoundError, OSError):
+            return
+        self._cur_dir = path
+        self._path_bar.setText(str(path))
+        self._list.clear()
+        self._selected = []
+        self._upd_sel_lbl()
+
+        from PySide6.QtWidgets import QListWidgetItem as _LWI
+        for item in items:
+            if item.name.startswith('.'):
+                continue  # 숨김 파일 제외
+            ext = item.suffix.lower()
+            if item.is_dir():
+                icon = "📁"
+            elif ext in ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'):
+                icon = "🖼"
+            elif ext == '.pdf':
+                icon = "📕"
+            elif ext in ('.doc', '.docx', '.hwp', '.odt'):
+                icon = "📝"
+            elif ext in ('.xls', '.xlsx', '.csv', '.ods'):
+                icon = "📊"
+            elif ext in ('.ppt', '.pptx'):
+                icon = "📊"
+            elif ext in ('.zip', '.rar', '.7z', '.tar', '.gz'):
+                icon = "📦"
+            elif ext in ('.py', '.js', '.ts', '.java', '.c', '.cpp', '.rs', '.go'):
+                icon = "💻"
+            elif ext in ('.txt', '.md', '.log'):
+                icon = "📄"
+            elif ext in ('.mp3', '.wav', '.flac', '.aac', '.ogg'):
+                icon = "🎵"
+            elif ext in ('.mp4', '.avi', '.mov', '.mkv'):
+                icon = "🎬"
+            else:
+                icon = "📄"
+
+            size_str = ""
+            if item.is_file():
+                try:
+                    sz = item.stat().st_size
+                    if sz < 1024:
+                        size_str = f"  {sz}B"
+                    elif sz < 1024 ** 2:
+                        size_str = f"  {sz // 1024}KB"
+                    else:
+                        size_str = f"  {sz // 1024 ** 2}MB"
+                except OSError:
+                    pass
+
+            lw = _LWI(f"{icon}  {item.name}{size_str}")
+            lw.setData(Qt.ItemDataRole.UserRole, item)
+            if item.is_dir():
+                lw.setForeground(QColor("#89b4fa"))
+            self._list.addItem(lw)
+
+    def _on_double(self, item):
+        p: Path = item.data(Qt.ItemDataRole.UserRole)
+        if p and p.is_dir():
+            self._nav(p)
+        elif p and p.is_file():
+            self._selected = [str(p)]
+            self._upd_sel_lbl()
+            self._btn_ok.setEnabled(True)
+            self.accept()
+
+    def _on_sel_changed(self):
+        sel = []
+        for item in self._list.selectedItems():
+            p: Path = item.data(Qt.ItemDataRole.UserRole)
+            if p and p.is_file():
+                sel.append(str(p))
+        self._selected = sel
+        self._upd_sel_lbl()
+        self._btn_ok.setEnabled(bool(sel))
+
+    def _upd_sel_lbl(self):
+        if not self._selected:
+            self._sel_lbl.setText("없음")
+        elif len(self._selected) == 1:
+            self._sel_lbl.setText(Path(self._selected[0]).name)
+        else:
+            self._sel_lbl.setText(f"{len(self._selected)}개 선택됨")
+
+    def _go_up(self):
+        parent = self._cur_dir.parent
+        if parent != self._cur_dir:
+            self._nav(parent)
+
+    def _try_accept(self):
+        if self._btn_ok.isEnabled():
+            self.accept()
+
+    def _manual_input(self):
+        from PySide6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(self, "직접 입력", "파일 경로:", text=str(self._cur_dir))
+        if ok and text.strip():
+            p = Path(text.strip())
+            if p.is_file():
+                self._selected = [str(p)]
+                self._upd_sel_lbl()
+                self._btn_ok.setEnabled(True)
+            elif p.is_dir():
+                self._nav(p)
+
+    def get_paths(self) -> list[str]:
+        return self._selected
+
+    @staticmethod
+    def pick_files(title: str = "파일 선택", multi: bool = True, parent=None) -> list[str]:
+        """정적 헬퍼 — 선택된 파일 경로 목록 반환 (취소 시 빈 리스트)"""
+        dlg = _FilePickerDialog(title=title, multi=multi, parent=parent)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg.get_paths()
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 9-B. SCHEDULE DIALOG
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -2864,12 +3149,9 @@ class TaskDialog(_MovableDialog):
         self.ed_title.setFocus()
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "파일 선택", "", "모든 파일 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        if path:
-            self.ed_fpath.setText(path)
+        paths = _FilePickerDialog.pick_files("파일 선택", multi=False, parent=self)
+        if paths:
+            self.ed_fpath.setText(paths[0])
 
     def _browse_folder(self):
         path = QFileDialog.getExistingDirectory(
@@ -2904,10 +3186,7 @@ class TaskDialog(_MovableDialog):
                 self._add_file_row(path, is_existing=False, file_id=None)
 
     def _add_file(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "파일 선택 (Ctrl+클릭으로 여러 개)", "", "모든 파일 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
+        paths = _FilePickerDialog.pick_files("파일 추가 (Shift/Ctrl+클릭으로 여러 개)", multi=True, parent=self)
         for path in paths:
             if path and path not in self._pending_files:
                 self._pending_files.append(path)
@@ -3200,12 +3479,9 @@ class LogItemWidget(QFrame):
         self.edit_btns.setVisible(False)
 
     def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "파일 선택", "", "모든 파일 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        if path:
-            self.ed_file_path.setText(path)
+        paths = _FilePickerDialog.pick_files("파일 선택", multi=False, parent=self)
+        if paths:
+            self.ed_file_path.setText(paths[0])
 
     def eventFilter(self, obj, event):
         """내용 라벨 더블클릭 → 편집 모드 진입 (TextSelectable 이벤트 우회)"""
