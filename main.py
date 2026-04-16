@@ -6150,7 +6150,7 @@ class OptionsDialog(_MovableDialog):
         self.spin_height.setRange(0, 2160)
         self.spin_height.setSingleStep(20)
         self.spin_height.setSpecialValueText("자동 (화면 96%)")
-        self.spin_height.setFixedWidth(100)
+        self.spin_height.setFixedWidth(150)
         # 0(자동)↔400(최소 수동) 사이 죽은 구간 방지
         self._prev_height_val = 0
         self._height_fixing = False
