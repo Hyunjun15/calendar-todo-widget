@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QPushButton, QComboBox, QProgressBar,
     QDateEdit, QMessageBox, QMenu, QSystemTrayIcon,
     QTabWidget, QSlider, QSpinBox, QFileDialog,
-    QListWidget, QTextBrowser,
+    QListWidget, QListWidgetItem, QTextBrowser,
 )
 from PySide6.QtCore import (
     Qt, Signal, QPoint, QSettings,
