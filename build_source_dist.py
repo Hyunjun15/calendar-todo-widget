@@ -80,7 +80,7 @@ def main():
 
     # ── 5. requirements.txt ───────────────────────────
     step(5, "requirements.txt 생성")
-    (APP_DIR / "requirements.txt").write_text("PySide6>=6.5.0\n", encoding="utf-8")
+    (APP_DIR / "requirements.txt").write_text("PySide6>=6.5.0,<7.0\n", encoding="utf-8")
     print("    완료")
 
     # ── 6. 설치_및_실행.bat 생성 (Python 자동 설치 포함) ──

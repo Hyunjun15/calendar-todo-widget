@@ -174,39 +174,13 @@ def main():
     bat_path.write_bytes(bat_content.encode("ascii"))
     print("    완료")
 
-    # ── 7. 사용_안내.txt 생성 ─────────────────────────
-    step(7, "사용_안내.txt 생성")
-    guide = (
-        "Calendar and To do list  사용 안내\n"
-        "====================================\n\n"
-        "[설치 방법]\n"
-        "1. 이 폴더를 원하는 위치(바탕화면, 문서 등)에 압축 해제합니다.\n"
-        "2. '바탕화면_바로가기.bat'를 실행하면 바탕화면에 단축 아이콘이 생깁니다.\n"
-        "3. 이후에는 바탕화면 아이콘 또는 'Calendar_and_To_do_list.exe'를 직접 실행하세요.\n\n"
-        "[업무 내역 파일 작성 방법]\n"
-        "'Update works' 폴더에 아래 형식으로 파일을 만드세요:\n\n"
-        "  파일명: YYYY.MM.DD.txt  (예: 2026.03.27.txt)\n\n"
-        "  [과제 및 To do list]\n"
-        "  1. 업무 제목\n"
-        "  (탭)내용: 세부 내용\n"
-        "  (탭)목표: 목표 사항\n"
-        "  (탭)마감기한: YYYY-MM-DD\n\n"
-        "  [이번주/차주 긴급 업무]\n"
-        "  1. 긴급 업무 내용\n\n"
-        "  [기타]\n"
-        "  1. 제목\n"
-        "  자유 텍스트\n\n"
-        "[데이터 저장 위치]\n"
-        "개인 태스크/일정/로그: %USERPROFILE%\\.productivity_widget\\tasks.db\n"
-        "(위젯을 삭제해도 데이터는 이 경로에 보존됩니다)\n\n"
-        "[단축키]\n"
-        "Ctrl+N  : 태스크 추가\n"
-        "Ctrl+T  : 항상 위에 표시 토글\n"
-        "Ctrl+M  : 접기/펼치기\n"
-        "더블클릭 : 태스크 편집\n"
-        "우클릭   : 컨텍스트 메뉴\n"
-    )
-    (APP_DIR / "사용_안내.txt").write_bytes(guide.encode("utf-8"))
+    # ── 7. 사용_안내.txt 복사 ─────────────────────────
+    step(7, "사용_안내.txt 복사")
+    _guide_src = BASE / "사용_안내.txt"
+    if _guide_src.exists():
+        shutil.copy2(str(_guide_src), str(APP_DIR / "사용_안내.txt"))
+    else:
+        print("    ⚠ 사용_안내.txt가 프로젝트 루트에 없습니다.")
     print("    완료")
 
     # ── 8. 임시 파일 정리 ─────────────────────────────
