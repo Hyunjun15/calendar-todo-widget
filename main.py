@@ -57,7 +57,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.27"
+APP_VERSION      = "v3.28"
 APP_VERSION_DATE = "2026-04-16"
 
 def resource_path(relative_path):
@@ -6833,6 +6833,349 @@ class AppUpdateDialog(_MovableDialog):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 14-A3. 사용 안내서 다이얼로그 (HTML)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class HelpDialog(_MovableDialog):
+    """앱 사용 안내서 — HTML 렌더링 + What's New 탭"""
+
+    _SECTIONS = [
+        ("whatsnew", "🆕 새 기능"),
+        ("shortcuts", "⌨ 단축키"),
+        ("tasks", "📝 태스크 관리"),
+        ("search", "🔍 검색"),
+        ("schedule", "📅 일정 관리"),
+        ("calendar", "📆 캘린더"),
+        ("ical", "🏢 연구실 일정"),
+        ("settings", "⚙ 설정"),
+        ("backup", "💾 백업 / 복원"),
+        ("export", "📤 내보내기"),
+        ("update", "⬆ 업데이트"),
+    ]
+
+    def __init__(self, parent=None, show_tab: str = "whatsnew"):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setModal(True)
+        self.setMinimumSize(680, 520)
+        self.resize(740, 620)
+        self._initial_tab = show_tab
+        self._build()
+        QShortcut(QKeySequence("Escape"), self, self.accept)
+
+    def _build(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(10)
+
+        # 타이틀
+        title_row = QHBoxLayout()
+        title = QLabel(f"📖  사용 안내서  —  {APP_VERSION}")
+        title.setObjectName("DialogTitle")
+        title.setFont(QFont("맑은 고딕", 14, QFont.Weight.Bold))
+        title_row.addWidget(title, 1)
+        btn_close = QPushButton("✕")
+        btn_close.setObjectName("TitleBarBtn")
+        btn_close.setFixedSize(28, 28)
+        btn_close.clicked.connect(self.accept)
+        title_row.addWidget(btn_close)
+        lay.addLayout(title_row)
+
+        # 스플리터: 좌측 목차 + 우측 콘텐츠
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(3)
+
+        # 좌측 목차
+        self.list_sections = QListWidget()
+        self.list_sections.setFixedWidth(150)
+        self.list_sections.setStyleSheet(
+            "QListWidget{background:#1e1e2e;border:1px solid #313244;border-radius:6px;}"
+            "QListWidget::item{padding:8px 10px;color:#cdd6f4;}"
+            "QListWidget::item:selected{background:#313244;color:#89b4fa;border-radius:4px;}"
+        )
+        for key, label in self._SECTIONS:
+            self.list_sections.addItem(label)
+        self.list_sections.currentRowChanged.connect(self._on_section)
+        splitter.addWidget(self.list_sections)
+
+        # 우측 HTML 뷰어
+        self.browser = QTextBrowser()
+        self.browser.setOpenExternalLinks(True)
+        self.browser.setStyleSheet(
+            "QTextBrowser{background:#181825;border:1px solid #313244;border-radius:6px;"
+            "padding:12px;color:#cdd6f4;font-size:13px;}"
+        )
+        splitter.addWidget(self.browser)
+        splitter.setSizes([150, 560])
+        lay.addWidget(splitter, 1)
+
+        # 초기 탭 선택
+        idx = next((i for i, (k, _) in enumerate(self._SECTIONS) if k == self._initial_tab), 0)
+        self.list_sections.setCurrentRow(idx)
+
+    def _on_section(self, row: int):
+        if row < 0 or row >= len(self._SECTIONS):
+            return
+        key = self._SECTIONS[row][0]
+        html = self._render(key)
+        self.browser.setHtml(html)
+
+    def _css(self) -> str:
+        return """
+        body { font-family: '맑은 고딕', sans-serif; color: #cdd6f4; line-height: 1.7; }
+        h2 { color: #89b4fa; border-bottom: 1px solid #313244; padding-bottom: 6px; margin-top: 18px; }
+        h3 { color: #f9e2af; margin-top: 14px; }
+        kbd { background: #313244; color: #a6e3a1; padding: 2px 7px; border-radius: 4px;
+              font-family: 'Consolas', monospace; font-size: 12px; border: 1px solid #45475a; }
+        .loc { background: rgba(137,180,250,0.12); color: #89b4fa; padding: 2px 6px;
+               border-radius: 4px; font-size: 12px; }
+        .new { background: rgba(166,227,161,0.15); color: #a6e3a1; padding: 1px 6px;
+               border-radius: 3px; font-size: 11px; }
+        ul { margin-left: 6px; padding-left: 14px; }
+        li { margin-bottom: 4px; }
+        .note { color: #fab387; font-size: 12px; }
+        """
+
+    def _render(self, key: str) -> str:
+        css = self._css()
+        body = getattr(self, f"_html_{key}", lambda: "<p>준비 중...</p>")()
+        return f"<html><head><style>{css}</style></head><body>{body}</body></html>"
+
+    def _html_whatsnew(self) -> str:
+        return """
+        <h2>🆕 v3.27 새 기능 및 개선</h2>
+
+        <h3>🔧 창 크기 설정 개선</h3>
+        <ul>
+          <li><span class="loc">설정 → 테마 &amp; 화면</span> SpinBox 상하 버튼에 <b>화살표(▲▼)</b> 표시 추가</li>
+          <li>창 높이: <b>0(자동) ↔ 400(최소)</b> 사이 죽은 구간 제거 — 버튼 한 번에 점프</li>
+          <li>창 너비 최소값을 실제 최소 크기(380px)와 일치시킴</li>
+        </ul>
+
+        <h3>🎨 색상 대비 전면 개선</h3>
+        <ul>
+          <li>할 일 카드의 편집/삭제/로그 버튼이 더 잘 보이도록 대비 향상</li>
+          <li>캘린더 마감일 셀 배경 강화 — 마감일 있는 날짜를 더 쉽게 구분</li>
+          <li>섹션 통계, 빈 상태 메시지, 완료 항목 글씨 가독성 개선</li>
+        </ul>
+
+        <h3>💾 백업 호환성 강화</h3>
+        <ul>
+          <li>JSON 내보내기에 <b>첨부파일 정보</b> 포함</li>
+          <li>불러오기 시 <b>완료 상태, 생성일, 정렬 순서</b> 완전 복원</li>
+        </ul>
+
+        <h3>🛡 안정성 개선</h3>
+        <ul>
+          <li>앱 비정상 종료 후에도 30초 뒤 자동으로 재실행 가능</li>
+          <li>태스크 삭제 시 데이터 안전성 강화</li>
+        </ul>
+        """
+
+    def _html_shortcuts(self) -> str:
+        return """
+        <h2>⌨ 키보드 단축키</h2>
+        <table cellspacing="8">
+        <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>새 태스크 추가</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>전체 검색</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>항상 위에 표시 토글</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>M</kbd></td><td>위젯 접기 / 펼치기</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>설정 열기</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>다이얼로그 저장</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>캘린더 이전/다음 달</td></tr>
+        <tr><td><kbd>Home</kbd></td><td>캘린더 오늘로 이동</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>다이얼로그/검색 닫기</td></tr>
+        </table>
+
+        <h3>마우스 조작</h3>
+        <ul>
+          <li><b>더블클릭</b> — 항목 편집 다이얼로그 열기</li>
+          <li><b>우클릭</b> — 컨텍스트 메뉴 (편집/삭제/완료)</li>
+          <li><b>드래그</b> — 태스크 순서 변경</li>
+        </ul>
+        """
+
+    def _html_tasks(self) -> str:
+        return """
+        <h2>📝 태스크 관리</h2>
+
+        <h3>태스크 종류</h3>
+        <ul>
+          <li>📝 <b>과제 / 할 일</b> — 마감일 기준 장기 과제</li>
+          <li>🚨 <b>긴급업무</b> — 이번 주 단기 처리</li>
+          <li>📌 <b>기타</b> — 자유 메모</li>
+          <li>👤 <b>개인업무</b> — 개인 일정/업무</li>
+        </ul>
+
+        <h3>태스크 추가</h3>
+        <p><kbd>Ctrl</kbd>+<kbd>N</kbd> 또는 <span class="loc">섹션 하단 [＋ 새 항목 추가]</span> 버튼</p>
+        <ul>
+          <li>제목, 설명, 목표, 우선순위(높음/보통/낮음), 마감일, 색상 설정</li>
+          <li>마감일은 <b>선택사항</b> — 체크박스로 활성화</li>
+        </ul>
+
+        <h3>파일 첨부 <span class="new">v3.20+</span></h3>
+        <p><span class="loc">태스크 편집 → ＋ 파일 추가</span></p>
+        <ul>
+          <li>커스텀 파일 선택 창: 폴더 트리, 즐겨찾기, 다중 선택</li>
+          <li>드래그 &amp; 드롭 지원, 확장자별 아이콘 + 파일 크기 표시</li>
+        </ul>
+
+        <h3>완료 처리</h3>
+        <ul>
+          <li>좌측 체크박스 클릭 → 완료 (취소선 + 흐림)</li>
+          <li>완료 항목은 <span class="loc">✅ 완료업무</span> 섹션에서 확인</li>
+          <li>완료 취소: 우클릭 → "미완료로"</li>
+          <li>완료된 항목 <b>더블클릭 → 편집 가능</b> <span class="new">v3.20+</span></li>
+          <li>접기/펼치기(▸/▾)로 상세 내용 확인 <span class="new">v3.13+</span></li>
+        </ul>
+
+        <h3>정렬 · 일괄 처리</h3>
+        <ul>
+          <li>정렬 드롭다운: 기본/마감일/우선순위/생성일/제목</li>
+          <li>☐ 버튼 → 배치 모드에서 일괄 완료/삭제</li>
+        </ul>
+        """
+
+    def _html_search(self) -> str:
+        return """
+        <h2>🔍 검색</h2>
+        <p><span class="loc">타이틀바 🔍 검색 버튼</span> 또는 <kbd>Ctrl</kbd>+<kbd>F</kbd></p>
+        <ul>
+          <li>검색 범위: 과제, 긴급업무, 개인업무, 일정</li>
+          <li>제목 / 내용 / 목표 / 일정명 / 장소 실시간 필터링</li>
+          <li>검색 결과 수 자동 표시</li>
+        </ul>
+        <h3>완료업무 검색</h3>
+        <p><span class="loc">✅ 완료업무 섹션</span> 펼치면 전용 검색창 표시</p>
+        """
+
+    def _html_schedule(self) -> str:
+        return """
+        <h2>📅 일정 관리</h2>
+        <p><span class="loc">일정 섹션 하단 [＋ 일정 추가]</span> 또는 캘린더 날짜 우클릭</p>
+        <h3>일정 종류</h3>
+        <ul>
+          <li>📅 단기 일정</li>
+          <li>🏖 연차 / 휴가</li>
+          <li>📚 교육</li>
+          <li>✈ 출장</li>
+        </ul>
+        <p>필드: 제목, 시작일~종료일, 시간, 장소, 내용</p>
+        <p>편집: 더블클릭 | 삭제: 우클릭</p>
+        """
+
+    def _html_calendar(self) -> str:
+        return """
+        <h2>📆 캘린더</h2>
+        <ul>
+          <li><b>파란 배경</b> = 오늘</li>
+          <li><b>분홍 배경</b> = 마감일이 있는 날</li>
+          <li><b>색상 점</b> = 연구실 일정(iCal)</li>
+        </ul>
+        <h3>조작</h3>
+        <ul>
+          <li><span class="loc">◀ ▶ 버튼</span> 또는 <kbd>Ctrl</kbd>+<kbd>←</kbd>/<kbd>→</kbd> — 월 이동</li>
+          <li><span class="loc">[오늘] 버튼</span> 또는 <kbd>Home</kbd> — 오늘로 이동</li>
+          <li><b>날짜 클릭</b> — 해당일 태스크/일정 팝업</li>
+          <li><b>날짜 우클릭</b> — 일정 추가 / 개인업무 추가</li>
+        </ul>
+        """
+
+    def _html_ical(self) -> str:
+        return """
+        <h2>🏢 연구실 일정 (카카오워크 iCal)</h2>
+        <p>카카오워크 팀 캘린더를 iCal 형식으로 연동합니다.</p>
+        <h3>색상 분류</h3>
+        <ul>
+          <li>🔵 <b>파란색</b> — 소장님일정 (최상단)</li>
+          <li>🟢 <b>초록색</b> — 연차, 예비군, 반차 등</li>
+          <li>🟠 <b>주황색</b> — 종일 일정</li>
+          <li>🟡 <b>노란색</b> — 시간 지정 일정</li>
+        </ul>
+        <h3>설정</h3>
+        <p><span class="loc">설정(⚙) → Co-work 탭</span> → iCal URL 입력 → 🔄 동기화</p>
+        """
+
+    def _html_settings(self) -> str:
+        return """
+        <h2>⚙ 설정</h2>
+        <p><span class="loc">타이틀바 ⚙ 버튼</span> 또는 <kbd>Ctrl</kbd>+<kbd>,</kbd></p>
+
+        <h3>탭 1 — 테마 &amp; 화면</h3>
+        <ul>
+          <li>테마: 다크 / 블랙 / 라떼 / 네이비 / 그루박스 / 도쿄 나이트</li>
+          <li>투명도, 글자 크기, 글씨체</li>
+          <li>창 너비 (380~1400px), 창 높이 (0=자동 또는 400~2160px)</li>
+          <li>배치 모니터 선택</li>
+          <li><span class="loc">버전 선택 / 업데이트</span> 버튼 <span class="new">v3.20+</span></li>
+        </ul>
+
+        <h3>탭 2 — 섹션 설정</h3>
+        <ul>
+          <li>각 섹션 표시/숨기기</li>
+          <li>바탕화면 바로가기, 피드백 보내기</li>
+        </ul>
+
+        <h3>탭 3 — 알림</h3>
+        <p>마감일 알림 On/Off (매 시간 체크)</p>
+
+        <h3>탭 4 — Co-work &amp; iCal</h3>
+        <p>카카오워크 iCal URL 입력 + 동기화 주기 설정</p>
+        """
+
+    def _html_backup(self) -> str:
+        return """
+        <h2>💾 백업 / 복원</h2>
+        <p><span class="loc">타이틀바 💾 버튼</span></p>
+
+        <h3>내보내기</h3>
+        <ul>
+          <li>할 일 + 로그 + 진행 그룹 + 첨부파일 정보를 JSON으로 저장</li>
+          <li>일정(schedules)도 선택 내보내기 가능</li>
+        </ul>
+
+        <h3>가져오기</h3>
+        <ul>
+          <li>JSON 파일에서 항목별 선택 복원</li>
+          <li><b>완료 상태, 생성일, 정렬 순서 완전 복원</b> <span class="new">v3.27+</span></li>
+          <li>첨부파일: 원본 경로에 파일이 있으면 자동 재첨부</li>
+        </ul>
+
+        <h3>자동 백업</h3>
+        <p>7일마다 앱 시작 시 자동 DB 백업<br>
+        <span class="note">저장 위치: %USERPROFILE%\\.productivity_widget\\backups\\</span></p>
+        """
+
+    def _html_export(self) -> str:
+        return """
+        <h2>📤 내보내기 (Export)</h2>
+        <p><span class="loc">타이틀바 📤 버튼</span></p>
+        <ul>
+          <li>완료/미완료 필터 선택</li>
+          <li>항목별 그룹명 설정</li>
+          <li>미리보기 → 클립보드 복사 또는 파일 저장</li>
+        </ul>
+        """
+
+    def _html_update(self) -> str:
+        return """
+        <h2>⬆ 업데이트</h2>
+        <p><span class="loc">설정(⚙) → 테마 &amp; 화면 → 버전 선택 / 업데이트</span></p>
+
+        <h3>기능 <span class="new">v3.20+</span></h3>
+        <ul>
+          <li>GitHub 전체 릴리즈 목록 조회</li>
+          <li>각 버전의 변경 내역(릴리즈 노트) 미리보기</li>
+          <li>원하는 버전 선택 후 직접 다운로드 (진행률 표시)</li>
+        </ul>
+
+        <h3>수동 업데이트</h3>
+        <p>다운로드한 zip에서 <b>main.py</b>와 <b>assets/</b> 폴더를 현재 위치에 덮어쓰고 재시작</p>
+        <p class="note">기존 데이터(tasks.db)는 자동으로 새 버전에 맞게 변환됩니다.</p>
+        """
+
+
 # 14-B. JSON 백업 / 복원 다이얼로그
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -7008,20 +7351,26 @@ class JsonBackupDialog(_MovableDialog):
         tasks = []
         for t in self.db.get_tasks():
             td = dict(t)
-            # 로그 (일반)
             td["logs"] = [dict(l) for l in self.db.get_general_logs(t["id"])]
-            # 진행 그룹
             td["progress_groups"] = []
             for g in self.db.get_progress_groups(t["id"]):
                 gd = dict(g)
                 gd["entries"] = [dict(e) for e in self.db.get_progress_logs(g["id"])]
                 td["progress_groups"].append(gd)
+            td["task_files"] = [
+                {"filename": f["filename"], "original_path": f["original_path"]}
+                for f in self.db.get_task_files(t["id"])
+            ]
             tasks.append(td)
         # 완료된 태스크도 포함
         for t in self.db.get_tasks(completed=True):
             td = dict(t)
             td["logs"] = [dict(l) for l in self.db.get_general_logs(t["id"])]
             td["progress_groups"] = []
+            td["task_files"] = [
+                {"filename": f["filename"], "original_path": f["original_path"]}
+                for f in self.db.get_task_files(t["id"])
+            ]
             tasks.append(td)
         return tasks
 
@@ -7092,9 +7441,21 @@ class JsonBackupDialog(_MovableDialog):
                     task.get("task_type", "todo"),
                     task.get("priority", 2),
                     task.get("due_date"),
-                    source=SOURCE_MANUAL,
+                    source=task.get("source", SOURCE_MANUAL),
                     color=task.get("color"),
+                    file_path=task.get("file_path"),
                 )
+                # 완료 상태 · 생성일 · 정렬순서 원본 복원
+                patches = {}
+                if task.get("is_completed"):
+                    patches["is_completed"] = 1
+                    patches["completed_at"] = task.get("completed_at")
+                if task.get("created_at"):
+                    patches["created_at"] = task["created_at"]
+                if task.get("sort_order"):
+                    patches["sort_order"] = task["sort_order"]
+                if patches:
+                    self.db.update_task(new_id, **patches)
                 # 로그 복원
                 for lg in task.get("logs", []):
                     self.db.add_log(new_id, lg.get("content",""), lg.get("file_path"))
@@ -7103,6 +7464,14 @@ class JsonBackupDialog(_MovableDialog):
                     grp_id = self.db.add_progress_group(new_id, g.get("title","복원된 그룹"))
                     for e in g.get("entries", []):
                         self.db.add_progress_log(new_id, grp_id, e.get("content",""))
+                # 첨부파일 복원 (원본 경로에 파일이 존재할 경우)
+                for tf in task.get("task_files", []):
+                    orig = tf.get("original_path", "")
+                    if orig and Path(orig).exists():
+                        try:
+                            self.db.add_task_file(new_id, orig)
+                        except Exception:
+                            pass
                 added_t += 1
             except Exception:
                 pass
@@ -7177,6 +7546,11 @@ class TitleBar(QWidget):
         self.btn_export.setObjectName("TitleBtn")
         self.btn_export.setFixedSize(34, 34); self.btn_export.setToolTip("업무 내보내기 (보고용)")
         lay.addWidget(self.btn_export)
+
+        self.btn_help = QPushButton("❓")
+        self.btn_help.setObjectName("TitleBtn")
+        self.btn_help.setFixedSize(34, 34); self.btn_help.setToolTip("사용 안내서")
+        lay.addWidget(self.btn_help)
 
         self.btn_search = QPushButton("🔍 검색")
         self.btn_search.setObjectName("TitleBtn")
@@ -7339,6 +7713,7 @@ class MainWindow(QWidget):
         self.tb.btn_close.clicked.connect(self._on_close_btn)
         self.tb.btn_col.clicked.connect(self._on_collapse)
         self.tb.btn_pin.toggled.connect(self._on_pin)
+        self.tb.btn_help.clicked.connect(self._open_help)
         self.tb.btn_backup.clicked.connect(self._open_backup)
         self.tb.btn_export.clicked.connect(self._open_export)
         self.tb.btn_options.clicked.connect(self._open_options)
@@ -7939,7 +8314,14 @@ class MainWindow(QWidget):
         # 첫 실행 온보딩
         if self.settings.value("first_run", True, type=bool):
             self.settings.setValue("first_run", False)
+            self.settings.setValue("last_seen_version", APP_VERSION)
             QTimer.singleShot(400, self._show_onboarding)
+        else:
+            # 버전 업데이트 후 "새 기능" 자동 표시
+            last_ver = self.settings.value("last_seen_version", "")
+            if last_ver != APP_VERSION:
+                self.settings.setValue("last_seen_version", APP_VERSION)
+                QTimer.singleShot(600, lambda: self._open_help("whatsnew"))
 
     def _show_onboarding(self):
         msg = QMessageBox(self)
@@ -7957,6 +8339,11 @@ class MainWindow(QWidget):
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.button(QMessageBox.StandardButton.Ok).setText("시작하기")
         msg.exec()
+
+    # ── 사용 안내서 다이얼로그 ──────────────────────────────────────────────
+    def _open_help(self, show_tab: str = "whatsnew"):
+        dlg = HelpDialog(self, show_tab=show_tab)
+        dlg.exec()
 
     # ── 백업/복원 다이얼로그 ────────────────────────────────────────────────
     def _open_backup(self):
