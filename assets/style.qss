@@ -283,11 +283,11 @@ QLabel#TaskTitleDone {
     color: #6c7086;  /* 수정 3: #45475a(1.7:1) → #6c7086(~3.0:1) 최소 가독성 확보 */
 }
 
-/* 편집/파일/삭제 버튼 — 기본은 희미하게, hover 시 강조 */
+/* 편집/파일/삭제 버튼 — 기본은 은은하게, hover 시 강조 */
 QPushButton#TaskDeleteBtn {
     background: transparent;
     border-radius: 4px;
-    color: #45475a;
+    color: #585b70;
     font-size: 12px;
     font-weight: bold;
     min-width: 24px; max-width: 24px;
@@ -305,7 +305,7 @@ QPushButton#TaskDeleteBtn:hover {
 QPushButton#TaskEditBtn {
     background: transparent;
     border-radius: 4px;
-    color: #45475a;
+    color: #585b70;
     font-size: 13px;
     min-width: 24px; max-width: 24px;
     padding: 0;
@@ -339,14 +339,14 @@ QPushButton#TaskFileBtn:hover {
 QPushButton#TaskLogBtn {
     background: transparent;
     border-radius: 4px;
-    color: #45475a;
+    color: #585b70;
     font-size: 12px;
     min-width: 24px; max-width: 24px;
     padding: 0;
 }
 QFrame#TaskItem:hover QPushButton#TaskLogBtn,
 QFrame#TaskItemCompleted:hover QPushButton#TaskLogBtn {
-    color: #45475a;
+    color: #7f849c;
 }
 QPushButton#TaskLogBtn:hover {
     background: rgba(166,227,161,0.2);

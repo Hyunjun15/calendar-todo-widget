@@ -57,8 +57,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.26"
-APP_VERSION_DATE = "2026-04-08"
+APP_VERSION      = "v3.27"
+APP_VERSION_DATE = "2026-04-16"
 
 def resource_path(relative_path):
     """
@@ -344,10 +344,10 @@ QPushButton#CalDayHasTasks:hover {{
         # 다크 테마: build_theme_qss 마지막에 명시적 오버라이드 (style.qss rgba 블렌딩 불확실성 제거)
         cal_deadline_css = f"""
 QPushButton#CalDayHasTasks {{
-    background: rgba(243,139,168,0.22);
+    background: rgba(243,139,168,0.32);
     border: 1px solid rgba(243,139,168,0.55);
     border-radius: 17px; font-size: 12px;
-    color: #e8395a; font-weight: bold;
+    color: #f06080; font-weight: bold;
 }}
 QPushButton#CalDayHasTasks:hover {{
     background: #6b1529;
@@ -393,7 +393,7 @@ QPushButton#RefreshBtn   {{ background: {t['surface0']}; color: {t['blue']}; }}
 QLabel#TitleLabel, QLabel#SectionTitle, QLabel#DialogTitle,
 QLabel#TaskTitle, QLabel#LogContent, QLabel#TaskInfoTitle,
 QLabel#CalHeaderLabel, QLabel#MiscTitle {{ color: {t['text']}; }}
-QLabel#SectionStats      {{ color: {t['subtext']}; }}
+QLabel#SectionStats      {{ color: {ov0}; }}
 QLabel#FormLabel         {{ color: {t['subtext']}; }}
 QLabel#CalDow            {{ color: {t['subtext']}; }}
 QLabel#TaskInfoDesc, QLabel#MiscContent {{ color: {ov0}; }}
@@ -404,8 +404,8 @@ QLabel#UpdateTime        {{ color: {ov0}; }}
 QLabel#VersionLabel      {{ color: {t['subtext']}; background: {t['mantle']}; border: 1px solid {t['surface0']}; }}
 QPushButton#AddTaskBtn   {{ color: {t['surface1']}; border: 1px dashed {t['surface0']}; }}
 
-/* ── 수정 3: 완료 태스크 최소 가독성 (1.7:1 → ~3.0:1) ── */
-QLabel#TaskTitleDone     {{ color: {ov0}; }}
+/* ── 수정 3: 완료 태스크 가독성 (~4.5:1) ── */
+QLabel#TaskTitleDone     {{ color: {ov1}; }}
 
 /* ── 수정 7: 일정 아이템 보조 텍스트 ── */
 QLabel#ScheduleItemName    {{ color: {t['text']}; }}
@@ -741,8 +741,7 @@ class Database:
                 "UPDATE tasks SET is_user_deleted=1 WHERE id=?", (task_id,)
             )
         else:
-            # 직접 입력 항목: hard delete + 로그도 삭제
-            self.conn.execute("DELETE FROM task_logs WHERE task_id=?", (task_id,))
+            # 직접 입력 항목: hard delete (tasks 먼저 → CASCADE로 로그도 삭제)
             self.conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         self.conn.commit()
 
@@ -1829,7 +1828,7 @@ class CalendarWidget(QWidget):
         # 캘린더 사용 힌트
         _cal_hint = QLabel("💡 날짜 우클릭 → 일정 추가  |  날짜 클릭 → 해당일 항목 강조")
         _cal_hint.setAlignment(Qt.AlignmentFlag.AlignRight)
-        _cal_hint.setStyleSheet("color:#585b70;font-size:10px;padding:1px 4px 3px 0;")
+        _cal_hint.setStyleSheet("color:#7f849c;font-size:11px;padding:1px 4px 3px 0;")
         lay.addWidget(_cal_hint)
 
         # ── 팀 일정 패널 (날짜 클릭 시 표시) ────────────────────────────
@@ -2031,11 +2030,13 @@ class CalendarWidget(QWidget):
     def _prev(self):
         if self._month == 1: self._month = 12; self._year -= 1
         else: self._month -= 1
+        self._selected = None   # 다른 달 이동 시 선택 초기화 → CoworkPanel 자동 숨김
         self._build()
 
     def _next(self):
         if self._month == 12: self._month = 1; self._year += 1
         else: self._month += 1
+        self._selected = None   # 다른 달 이동 시 선택 초기화 → CoworkPanel 자동 숨김
         self._build()
 
     def _goto_today(self):
@@ -2536,7 +2537,7 @@ class _FilePickerDialog(_MovableDialog):
         self._cur_dir  = Path.home()
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumSize(560, 420)
+        self.setMinimumSize(460, 420)
         self._build(title)
         self._nav(self._cur_dir)
         QShortcut(QKeySequence("Escape"),    self, self.reject)
@@ -4321,7 +4322,7 @@ class TaskSection(QWidget):
         self.empty_lbl = QLabel(_empty_text)
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#7f849c;padding:14px 0;font-size:12px;")
         self.empty_lbl.hide()
         b_lay.addWidget(self.empty_lbl)
         self.btn_add = QPushButton("＋  새 항목 추가  (Ctrl+N)")
@@ -5105,7 +5106,7 @@ class CompletedSection(QWidget):
         self.empty_lbl = QLabel("완료된 항목이 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#7f849c;padding:14px 0;font-size:12px;")
         b_lay.addWidget(self.empty_lbl)
         self.no_result_lbl = QLabel("검색 결과가 없습니다.")
         self.no_result_lbl.setObjectName("TaskInfoDesc")
@@ -5238,7 +5239,7 @@ class MiscSection(QWidget):
         self.empty_lbl = QLabel("기타 항목이 없습니다.")
         self.empty_lbl.setObjectName("TaskInfoDesc")
         self.empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_lbl.setStyleSheet("color:#6c7086;padding:14px 0;font-size:12px;")
+        self.empty_lbl.setStyleSheet("color:#7f849c;padding:14px 0;font-size:12px;")
         self.empty_lbl.hide()
         b_lay.addWidget(self.empty_lbl)
         btn_add = QPushButton("＋  기타 항목 추가")
@@ -6026,11 +6027,12 @@ class ExportDialog(_MovableDialog):
 class OptionsDialog(_MovableDialog):
     """설정 다이얼로그 — 테마/화면, 섹션설정, 알림 3개 탭"""
 
-    theme_changed     = Signal(str)   # theme key
-    opacity_changed   = Signal(int)   # 0-100
-    section_changed   = Signal()      # 섹션 가시성 변경
-    notif_changed     = Signal(bool)  # 알림 on/off
-    font_size_changed = Signal(int)   # pt
+    theme_changed          = Signal(str)   # theme key
+    opacity_changed        = Signal(int)   # 0-100
+    section_changed        = Signal()      # 섹션 가시성 변경
+    notif_changed          = Signal(bool)  # 알림 on/off
+    font_size_changed      = Signal(int)   # pt
+    window_height_changed  = Signal(int)   # px (0=자동)
 
     def __init__(self, settings: QSettings, parent=None):
         super().__init__(parent)
@@ -6129,7 +6131,7 @@ class OptionsDialog(_MovableDialog):
         lay.addWidget(self._lbl("창 너비 (px)"))
         w_row = QHBoxLayout()
         self.spin_width = QSpinBox()
-        self.spin_width.setRange(320, 1400)
+        self.spin_width.setRange(380, 1400)
         self.spin_width.setSingleStep(20)
         self.spin_width.setValue(WINDOW_WIDTH)
         self.spin_width.setFixedWidth(100)
@@ -6141,12 +6143,43 @@ class OptionsDialog(_MovableDialog):
         w_row.addStretch()
         lay.addLayout(w_row)
 
+        # ── 창 높이 ────────────────────────────────────────────
+        lay.addWidget(self._lbl("창 높이 (px)"))
+        h_row = QHBoxLayout()
+        self.spin_height = QSpinBox()
+        self.spin_height.setRange(0, 2160)
+        self.spin_height.setSingleStep(20)
+        self.spin_height.setSpecialValueText("자동 (화면 96%)")
+        self.spin_height.setFixedWidth(100)
+        # 0(자동)↔400(최소 수동) 사이 죽은 구간 방지
+        self._prev_height_val = 0
+        self._height_fixing = False
+        def _height_step_fix(val):
+            if self._height_fixing:
+                return
+            if 0 < val < 400:
+                self._height_fixing = True
+                # ▲ 눌렀으면 400으로, ▼ 눌렀으면 0으로
+                self.spin_height.setValue(400 if val > self._prev_height_val else 0)
+                self._height_fixing = False
+                return
+            self._prev_height_val = val
+            self.settings.setValue("window_height", val)
+            self.window_height_changed.emit(val)
+        self.spin_height.valueChanged.connect(_height_step_fix)
+        h_row.addWidget(self.spin_height)
+        h_rec = QLabel("0=자동  |  수동 지정 시 즉시 적용")
+        h_rec.setStyleSheet("color:#6c7086;font-size:11px;")
+        h_row.addWidget(h_rec)
+        h_row.addStretch()
+        lay.addLayout(h_row)
+
         # ── 배치 모니터 ────────────────────────────────────────
         lay.addWidget(self._lbl("배치 모니터"))
         from PySide6.QtGui import QGuiApplication
         self.combo_monitor = QComboBox()
         self.combo_monitor.addItem("오른쪽 모니터 (기본)", "right")
-        self.combo_monitor.addItem("왼쪽 / 단일 모니터", "left")
+        self.combo_monitor.addItem("왼쪽 모니터", "left")
         self.combo_monitor.addItem("기본(Primary) 모니터", "primary")
         screens = QGuiApplication.screens()
         for idx, s in enumerate(screens):
@@ -6163,6 +6196,9 @@ class OptionsDialog(_MovableDialog):
                                            self.combo_monitor.currentData())
         )
         lay.addWidget(self.combo_monitor)
+        mon_note = QLabel("위젯은 선택한 모니터의 오른쪽 끝 상단에 배치됩니다.")
+        mon_note.setStyleSheet("color:#6c7086;font-size:11px;")
+        lay.addWidget(mon_note)
 
         # ── UI 테마 ────────────────────────────────────────────
         lay.addWidget(self._lbl("UI 색상 테마"))
@@ -6428,6 +6464,10 @@ class OptionsDialog(_MovableDialog):
         # 창 너비
         w = self.settings.value("window_width", WINDOW_WIDTH, type=int)
         self.spin_width.setValue(w)
+
+        # 창 높이 (0=자동)
+        h = self.settings.value("window_height", 0, type=int)
+        self.spin_height.setValue(h)
 
         # 테마
         theme = self.settings.value("theme", "dark")
@@ -7087,6 +7127,20 @@ class JsonBackupDialog(_MovableDialog):
 # 15. TITLE BAR
 # ═══════════════════════════════════════════════════════════════════════════
 
+class _ElidedLabel(QLabel):
+    """공간이 부족할 때 '...' 말줄임표로 텍스트를 자르는 QLabel."""
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter
+        painter = QPainter(self)
+        metrics = self.fontMetrics()
+        elided = metrics.elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, self.width()
+        )
+        painter.setFont(self.font())
+        painter.setPen(self.palette().windowText().color())
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+
+
 class TitleBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -7100,11 +7154,12 @@ class TitleBar(QWidget):
         lay.setContentsMargins(14, 0, 8, 0)
         lay.setSpacing(4)
 
-        nm = QLabel("📋  ToDo & Calendar")
+        nm = _ElidedLabel("📋  ToDo & Calendar")
         nm.setObjectName("TitleLabel")
         nm.setFont(QFont("맑은 고딕", 12, QFont.Weight.Bold))
         nm.setToolTip(f"버전 {APP_VERSION}  ({APP_VERSION_DATE})")
         nm.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        nm.setMinimumWidth(60)
         lay.addWidget(nm, 1)
 
         ver_lbl = QLabel(APP_VERSION)
@@ -7126,7 +7181,7 @@ class TitleBar(QWidget):
         self.btn_search = QPushButton("🔍 검색")
         self.btn_search.setObjectName("TitleBtn")
         self.btn_search.setFixedHeight(34)
-        self.btn_search.setMinimumWidth(60)
+        self.btn_search.setMinimumWidth(52)
         self.btn_search.setToolTip("검색 (Ctrl+F)")
         lay.addWidget(self.btn_search)
 
@@ -7195,10 +7250,7 @@ class MainWindow(QWidget):
 
     def _compute_window_size(self) -> tuple[int, int]:
         """현재 배치될 스크린 해상도에 비례해 창 크기 계산 (기준 비율 유지)"""
-        from PySide6.QtGui import QGuiApplication
-        screens = QGuiApplication.screens()
-        tgt = max(screens, key=lambda s: s.geometry().x()) if len(screens) >= 2 \
-              else QGuiApplication.primaryScreen()
+        tgt = self._pick_monitor()
         geo = tgt.availableGeometry()
         # 기준: WINDOW_WIDTH/WINDOW_HEIGHT = 0.5 (aspect ratio)
         aspect = WINDOW_WIDTH / WINDOW_HEIGHT
@@ -7310,6 +7362,8 @@ class MainWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+M"), self, self._on_collapse)
         QShortcut(QKeySequence("Ctrl+,"), self, self._open_options)
         QShortcut(QKeySequence("Ctrl+F"), self, self._toggle_search)
+        # 포커스 위치에 관계없이 과제/할 일 추가 (WindowShortcut = 창에 포커스만 있으면 동작)
+        QShortcut(QKeySequence("Ctrl+N"), self, self.sec_todo._add)
 
     # ── 검색 ─────────────────────────────────────────────────────────────────
     def _make_search_bar(self) -> QWidget:
@@ -7823,11 +7877,8 @@ class MainWindow(QWidget):
 
     def _resize_anchored_right(self, new_width: int):
         """너비 변경 시 오른쪽 가장자리 고정 → 왼쪽으로 확장"""
-        from PySide6.QtGui import QGuiApplication
-        # 현재 스크린 오른쪽 끝 기준으로 앵커 계산 (저장된 위치 대신 스크린 기준 사용)
-        screens = QGuiApplication.screens()
-        tgt = max(screens, key=lambda s: s.geometry().x()) if len(screens) >= 2 \
-              else QGuiApplication.primaryScreen()
+        # monitor_placement 설정 기준 스크린 사용 (_pick_monitor와 일치)
+        tgt = self._pick_monitor()
         geo = tgt.availableGeometry()
         # 오른쪽 끝 = 현재 x + 현재 width, 단 스크린 right를 넘지 않도록 clamp
         right_edge = min(self.x() + self.width(), geo.right())
@@ -7856,9 +7907,12 @@ class MainWindow(QWidget):
         op = self.settings.value("opacity", 100, type=int)
         if op != 100:
             self._apply_opacity(op)
-        w = self.settings.value("window_width", WINDOW_WIDTH, type=int)
+        w = max(380, min(1400, self.settings.value("window_width", WINDOW_WIDTH, type=int)))
         if w != WINDOW_WIDTH:
             self._resize_anchored_right(w)
+        h = max(0, min(2160, self.settings.value("window_height", 0, type=int)))
+        if h >= 400:
+            self.resize(self.width(), h)
         # 섹션 가시성 복원
         self._apply_section_visibility({
             "show_calendar": self.settings.value("show_calendar", True, type=bool),
@@ -7916,11 +7970,18 @@ class MainWindow(QWidget):
         dlg.exec()
 
     # ── 설정 다이얼로그 ──────────────────────────────────────────────────────
+    def _apply_window_height(self, h: int):
+        """창 높이 즉시 적용. h=0 이면 화면 96% 자동 계산."""
+        if h <= 0:
+            _, h = self._compute_window_size()
+        self.resize(self.width(), h)
+
     def _open_options(self):
         dlg = OptionsDialog(self.settings, self)
         dlg.theme_changed.connect(self._apply_theme)
         dlg.opacity_changed.connect(self._apply_opacity)
         dlg.font_size_changed.connect(self._apply_font_size)
+        dlg.window_height_changed.connect(self._apply_window_height)
         dlg.section_changed.connect(lambda: self._apply_section_visibility(
             dlg.get_section_visibility()
         ))
@@ -8125,6 +8186,8 @@ QSpinBox::up-button, QSpinBox::down-button {
     width: 18px; background: #313244; border-radius: 4px; margin: 2px;
 }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #45475a; }
+QSpinBox::up-arrow   { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid #a6adc8; width: 0; height: 0; }
+QSpinBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #a6adc8; width: 0; height: 0; }
 
 /* ── 일정 아이템 ─────────────────────────────────────────── */
 QFrame#ScheduleItem {
@@ -8170,7 +8233,7 @@ def main():
     _lock_dir.mkdir(exist_ok=True)
     lock_path = str(_lock_dir / "app.lock")
     lock = QLockFile(lock_path)
-    lock.setStaleLockTime(0)
+    lock.setStaleLockTime(30000)  # 30초 — 크래시 후 잠금 자동 해제
     if not lock.tryLock(100):
         # 이미 실행 중 → 조용히 종료
         sys.exit(0)
