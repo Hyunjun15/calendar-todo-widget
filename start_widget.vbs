@@ -1,26 +1,32 @@
-' Calendar and To do list — 자동 시작 스크립트
-' 콘솔 창 없이 백그라운드 실행 (어느 PC에서든 작동)
-
-Option Explicit
-
-Dim WshShell, fso, scriptDir
-
-Set WshShell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
+Set WshShell = CreateObject("WScript.Shell")
 
-' 스크립트가 있는 폴더를 작업 디렉토리로 설정 (상대경로)
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
-WshShell.CurrentDirectory = scriptDir
+localApp = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%")
 
-' pythonw (콘솔 없음) 또는 python (폴백) 으로 실행
-' 0 = 창 숨김, False = 비동기 (기다리지 않음)
-On Error Resume Next
-WshShell.Run "pythonw """ & scriptDir & "\main.py""", 0, False
-If Err.Number <> 0 Then
-    Err.Clear
-    WshShell.Run "python """ & scriptDir & "\main.py""", 0, False
+pyPath = ""
+
+If fso.FileExists("C:\Python313\pythonw.exe") Then
+    pyPath = "C:\Python313\pythonw.exe"
+ElseIf fso.FileExists("C:\Python312\pythonw.exe") Then
+    pyPath = "C:\Python312\pythonw.exe"
+ElseIf fso.FileExists("C:\Python311\pythonw.exe") Then
+    pyPath = "C:\Python311\pythonw.exe"
+ElseIf fso.FileExists("C:\Python310\pythonw.exe") Then
+    pyPath = "C:\Python310\pythonw.exe"
+ElseIf fso.FileExists(localApp & "\Programs\Python\Python313\pythonw.exe") Then
+    pyPath = localApp & "\Programs\Python\Python313\pythonw.exe"
+ElseIf fso.FileExists(localApp & "\Programs\Python\Python312\pythonw.exe") Then
+    pyPath = localApp & "\Programs\Python\Python312\pythonw.exe"
+ElseIf fso.FileExists(localApp & "\Programs\Python\Python311\pythonw.exe") Then
+    pyPath = localApp & "\Programs\Python\Python311\pythonw.exe"
+ElseIf fso.FileExists(localApp & "\Programs\Python\Python310\pythonw.exe") Then
+    pyPath = localApp & "\Programs\Python\Python310\pythonw.exe"
 End If
-On Error GoTo 0
 
-Set fso = Nothing
-Set WshShell = Nothing
+If pyPath = "" Then
+    MsgBox "Python을 찾을 수 없습니다." & vbCrLf & vbCrLf & "설치_및_실행.bat 을 먼저 실행해 주세요.", vbExclamation, "Calendar and To do list"
+    WScript.Quit 1
+End If
+
+WshShell.Run """" & pyPath & """ """ & scriptDir & "\main.py""", 0, False

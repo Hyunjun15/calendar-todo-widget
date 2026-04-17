@@ -58,7 +58,7 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.29"
+APP_VERSION      = "v3.30"
 APP_VERSION_DATE = "2026-04-17"
 
 def resource_path(relative_path):
@@ -7944,6 +7944,36 @@ class MainWindow(QWidget):
             QSystemTrayIcon.MessageIcon.Information,
             2000
         )
+
+    # ── 메인 윈도우 가장자리 드래그 리사이즈 ──────────────────────────────
+    _RESIZE_MARGIN = 6
+
+    def nativeEvent(self, eventType, message):
+        """프레임리스 창의 가장자리를 드래그하여 크기 조절"""
+        if eventType == b"windows_generic_MSG":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                msg = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    sx = ctypes.c_int16(msg.lParam & 0xFFFF).value
+                    sy = ctypes.c_int16((msg.lParam >> 16) & 0xFFFF).value
+                    pos = self.mapFromGlobal(QPoint(sx, sy))
+                    m = self._RESIZE_MARGIN
+                    w, h = self.width(), self.height()
+                    lft, rgt = pos.x() < m, pos.x() > w - m
+                    top, bot = pos.y() < m, pos.y() > h - m
+                    if lft and top: return True, 13
+                    if rgt and top: return True, 14
+                    if lft and bot: return True, 16
+                    if rgt and bot: return True, 17
+                    if lft: return True, 10
+                    if rgt: return True, 11
+                    if top: return True, 12
+                    if bot: return True, 15
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
 
     def _quit_app(self):
         """트레이 메뉴 '종료' → 완전 종료"""

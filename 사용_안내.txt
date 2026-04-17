@@ -1,6 +1,6 @@
 Calendar and To do list  사용 안내서
 =====================================
-버전 v3.28  |  2026-04-16
+버전 v3.30  |  2026-04-17
 =====================================
 
 
@@ -312,4 +312,4 @@ Calendar and To do list  사용 안내서
   GitHub Issues: https://github.com/Hyunjun15/calendar-todo-widget/issues
   설정 → 섹션 설정 탭 → "✉ 개발자에게 피드백 보내기" 버튼
 
-  버전: v3.27  (2026-04-16)
+  버전: v3.30  (2026-04-17)
