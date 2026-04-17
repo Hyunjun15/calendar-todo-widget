@@ -4187,13 +4187,10 @@ class LogDialog(_MovableDialog):
         # ProgressEntryRow 가 자체 라벨을 즉시 업데이트하므로 reload 불필요
 
     def _browse_attach(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "파일 선택", "", "모든 파일 (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        if path:
-            self._log_attach_path = path
-            self.lbl_attach.setText(f"📎 {Path(path).name}")
+        paths = _FilePickerDialog.pick_files("파일 선택", multi=False, parent=self)
+        if paths:
+            self._log_attach_path = paths[0]
+            self.lbl_attach.setText(f"📎 {Path(paths[0]).name}")
 
     def _clear_attach(self):
         self._log_attach_path = ""
@@ -7674,7 +7671,24 @@ class MainWindow(QWidget):
         # 저장된 테마 기준으로 QSS 적용 (dark도 포함 — 테마별 오버라이드 항상 적용)
         theme = self.settings.value("theme", "dark")
         fs = int(self.settings.value("font_size", 10))
-        self.setStyleSheet(base + EXTRA_QSS + build_theme_qss(theme, fs))
+        ff = self.settings.value("font_family", "맑은 고딕")
+        extra = EXTRA_QSS
+        # 라이트 테마: EXTRA_QSS의 다크 하드코딩 색상을 밝은 색으로 교체
+        if _theme_is_light(THEMES.get(theme, THEMES["dark"])["base"]):
+            _light_map = {
+                "#1e1e2e": "#eff1f5", "#181825": "#e6e9ef", "#13131d": "#dce0e8",
+                "#27273a": "#eff1f5", "#22223a": "#e6e9ef", "#2a2a46": "#dce0e8",
+                "#313244": "#ccd0da", "#45475a": "#bcc0cc", "#3d3d58": "#bcc0cc",
+                "#2e2e48": "#ccd0da", "#3d3d60": "#bcc0cc",
+                "#cdd6f4": "#4c4f69", "#a6adc8": "#6c6f85", "#7f849c": "#7c7f93",
+                "#6c7086": "#8c8fa1", "#585b70": "#9ca0b0",
+                "#89b4fa": "#1e66f5", "#b4befe": "#3a6ff0",
+                "#f38ba8": "#d20f39", "#a6e3a1": "#40a02b", "#f9e2af": "#df8e1d",
+                "#fab387": "#fe640b",
+            }
+            for dark, light in _light_map.items():
+                extra = extra.replace(dark, light)
+        self.setStyleSheet(base + extra + build_theme_qss(theme, fs, ff))
 
     def _build(self):
         lay = QVBoxLayout(self)
