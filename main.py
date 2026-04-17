@@ -58,8 +58,8 @@ from PySide6.QtCore import QMimeData
 # 2. CONSTANTS & PATHS
 # ═══════════════════════════════════════════════════════════════════════════
 
-APP_VERSION      = "v3.28"
-APP_VERSION_DATE = "2026-04-16"
+APP_VERSION      = "v3.29"
+APP_VERSION_DATE = "2026-04-17"
 
 def resource_path(relative_path):
     """
@@ -2448,6 +2448,20 @@ class _MovableDialog(QDialog):
                 self.resize(w, h)
             except Exception:
                 pass
+        # 화면 밖 이탈 방지 — 다이얼로그가 화면 영역 안에 있도록 clamp
+        self._clamp_to_screen()
+
+    def _clamp_to_screen(self):
+        """다이얼로그가 화면 바깥으로 나가지 않도록 위치 보정"""
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.screenAt(self.pos())
+        if not screen:
+            screen = QGuiApplication.primaryScreen()
+        geo = screen.availableGeometry()
+        x, y = self.x(), self.y()
+        x = max(geo.left(), min(x, geo.right() - self.width()))
+        y = max(geo.top(), min(y, geo.bottom() - self.height()))
+        self.move(x, y)
 
     def closeEvent(self, event):
         self._save_size(); super().closeEvent(event)
@@ -3452,14 +3466,23 @@ class LogItemWidget(QFrame):
         # 편집 모드: 파일 경로 변경
         self.ed_file_row = QWidget()
         efr_lay = QHBoxLayout(self.ed_file_row)
-        efr_lay.setContentsMargins(0, 2, 0, 0)
-        efr_lay.setSpacing(4)
+        efr_lay.setContentsMargins(0, 4, 0, 0)
+        efr_lay.setSpacing(6)
+        lbl_fp = QLabel("📎")
+        lbl_fp.setFixedWidth(20)
+        lbl_fp.setStyleSheet("font-size:14px;background:transparent;")
+        efr_lay.addWidget(lbl_fp)
         self.ed_file_path = QLineEdit()
         self.ed_file_path.setPlaceholderText("첨부 파일 경로 (선택 사항)...")
+        self.ed_file_path.setStyleSheet(
+            "QLineEdit{background:#1e1e2e;border:1px solid #45475a;border-radius:5px;"
+            "padding:4px 8px;color:#cdd6f4;font-size:11px;}"
+            "QLineEdit:focus{border-color:#89b4fa;}"
+        )
         efr_lay.addWidget(self.ed_file_path, 1)
-        btn_fp_browse = QPushButton("📂")
-        btn_fp_browse.setObjectName("LogFileBtn")
-        btn_fp_browse.setFixedSize(28, 28)
+        btn_fp_browse = QPushButton("📂 첨부")
+        btn_fp_browse.setObjectName("SecondaryBtn")
+        btn_fp_browse.setFixedHeight(28)
         btn_fp_browse.setToolTip("파일 선택")
         btn_fp_browse.clicked.connect(self._browse_file)
         efr_lay.addWidget(btn_fp_browse)
@@ -8603,6 +8626,45 @@ QLabel#VersionLabel {
     padding: 1px 6px;
     letter-spacing: 0.5px;
 }
+
+/* ── Qt 파일 다이얼로그 (DontUseNativeDialog) 다크 테마 ── */
+QFileDialog {
+    background: #1e1e2e; color: #cdd6f4;
+}
+QFileDialog QLabel { color: #cdd6f4; }
+QFileDialog QLineEdit {
+    background: #27273a; border: 1px solid #3d3d58; border-radius: 4px;
+    padding: 4px 8px; color: #cdd6f4;
+}
+QFileDialog QTreeView, QFileDialog QListView {
+    background: #181825; color: #cdd6f4; border: 1px solid #313244;
+    selection-background-color: #45475a; selection-color: #cdd6f4;
+}
+QFileDialog QTreeView::item:hover, QFileDialog QListView::item:hover {
+    background: #313244;
+}
+QFileDialog QHeaderView::section {
+    background: #1e1e2e; color: #a6adc8; border: 1px solid #313244;
+    padding: 4px 8px;
+}
+QFileDialog QPushButton {
+    background: #313244; color: #cdd6f4; border: 1px solid #45475a;
+    border-radius: 4px; padding: 4px 12px; min-height: 24px;
+}
+QFileDialog QPushButton:hover { background: #45475a; }
+QFileDialog QComboBox {
+    background: #27273a; color: #cdd6f4; border: 1px solid #3d3d58;
+    border-radius: 4px; padding: 4px 8px;
+}
+QFileDialog QComboBox QAbstractItemView {
+    background: #1e1e2e; color: #cdd6f4; selection-background-color: #45475a;
+}
+QFileDialog QToolButton {
+    background: #313244; color: #cdd6f4; border: 1px solid #45475a;
+    border-radius: 4px;
+}
+QFileDialog QToolButton:hover { background: #45475a; }
+QFileDialog QSplitter::handle { background: #313244; }
 """
 
 
