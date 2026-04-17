@@ -6966,8 +6966,8 @@ class HelpDialog(_MovableDialog):
         return f"<html><head><style>{css}</style></head><body>{body}</body></html>"
 
     def _html_whatsnew(self) -> str:
-        return """
-        <h2>🆕 v3.27 새 기능 및 개선</h2>
+        return f"""
+        <h2>🆕 {APP_VERSION} 새 기능 및 개선</h2>
 
         <h3>🔧 창 크기 설정 개선</h3>
         <ul>
