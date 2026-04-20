@@ -7960,11 +7960,10 @@ class MainWindow(QWidget):
         )
 
     # ── 메인 윈도우 가장자리 드래그 리사이즈 ──────────────────────────────
-    _RESIZE_MARGIN = 3  # 좁게: 캘린더 셀 hover와 간섭 최소화
+    _RESIZE_MARGIN = 7  # 잡기 편한 너비 (좌·우·하단만 — 상단은 타이틀바)
 
     def nativeEvent(self, eventType, message):
-        """프레임리스 창의 좌·우·하단 가장자리를 드래그하여 크기 조절
-        (상단은 타이틀바 영역이므로 리사이즈 제외)"""
+        """프레임리스 창의 좌·우·하단 가장자리를 드래그하여 크기 조절"""
         if eventType == b"windows_generic_MSG":
             try:
                 import ctypes
@@ -7976,10 +7975,12 @@ class MainWindow(QWidget):
                     pos = self.mapFromGlobal(QPoint(sx, sy))
                     m = self._RESIZE_MARGIN
                     w, h = self.width(), self.height()
-                    # 좌·우·하단만 허용 — 상단은 타이틀바
+                    # 타이틀바(상단 ~44px)는 리사이즈 영역 제외
+                    if pos.y() < 44:
+                        return super().nativeEvent(eventType, message)
                     lft = 0 <= pos.x() < m
-                    rgt = w - m < pos.x() <= w
-                    bot = h - m < pos.y() <= h
+                    rgt = w - m <= pos.x() <= w
+                    bot = h - m <= pos.y() <= h
                     if lft and bot: return True, 16   # HTBOTTOMLEFT
                     if rgt and bot: return True, 17   # HTBOTTOMRIGHT
                     if lft:         return True, 10   # HTLEFT
