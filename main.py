@@ -7960,10 +7960,11 @@ class MainWindow(QWidget):
         )
 
     # ── 메인 윈도우 가장자리 드래그 리사이즈 ──────────────────────────────
-    _RESIZE_MARGIN = 6
+    _RESIZE_MARGIN = 3  # 좁게: 캘린더 셀 hover와 간섭 최소화
 
     def nativeEvent(self, eventType, message):
-        """프레임리스 창의 가장자리를 드래그하여 크기 조절"""
+        """프레임리스 창의 좌·우·하단 가장자리를 드래그하여 크기 조절
+        (상단은 타이틀바 영역이므로 리사이즈 제외)"""
         if eventType == b"windows_generic_MSG":
             try:
                 import ctypes
@@ -7975,16 +7976,15 @@ class MainWindow(QWidget):
                     pos = self.mapFromGlobal(QPoint(sx, sy))
                     m = self._RESIZE_MARGIN
                     w, h = self.width(), self.height()
-                    lft, rgt = pos.x() < m, pos.x() > w - m
-                    top, bot = pos.y() < m, pos.y() > h - m
-                    if lft and top: return True, 13
-                    if rgt and top: return True, 14
-                    if lft and bot: return True, 16
-                    if rgt and bot: return True, 17
-                    if lft: return True, 10
-                    if rgt: return True, 11
-                    if top: return True, 12
-                    if bot: return True, 15
+                    # 좌·우·하단만 허용 — 상단은 타이틀바
+                    lft = 0 <= pos.x() < m
+                    rgt = w - m < pos.x() <= w
+                    bot = h - m < pos.y() <= h
+                    if lft and bot: return True, 16   # HTBOTTOMLEFT
+                    if rgt and bot: return True, 17   # HTBOTTOMRIGHT
+                    if lft:         return True, 10   # HTLEFT
+                    if rgt:         return True, 11   # HTRIGHT
+                    if bot:         return True, 15   # HTBOTTOM
             except Exception:
                 pass
         return super().nativeEvent(eventType, message)
